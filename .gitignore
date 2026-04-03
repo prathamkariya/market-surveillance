@@ -1,0 +1,27 @@
+# Environment variables (passwords, API keys)
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment (never commit this)
+venv/
+env/
+
+# Database files
+*.db
+*.sqlite
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage reports
+htmlcov/
+.coverage
