@@ -26,7 +26,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from app.database import SessionLocal
 from app.models import Anomaly, MarketData, User
 from app.services.anomaly_service import score_live_trade
-from app.services.redis_service import get_async_redis, STREAM_TRADES, STREAM_SENTIMENT
+from app.services.redis_service import (
+    get_async_redis,
+    setup_consumer_group,
+    read_trades_blocking,
+    STREAM_TRADES,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,20 +87,35 @@ async def run():
                 # 2. Get sentiment
                 sentiment = await get_latest_sentiment(client, trade["symbol"])
                 
-                # 3. Score
-                alert = score_live_trade(trade, history, sentiment)
+                # 3. Score — route to the correct per-market model registry.
+                # trade["market"] comes from UnifiedTradeEvent.market set by each adapter.
+                # Defaults to CRYPTO if somehow absent.
+                market = trade.get("market", "CRYPTO")
+                alert = score_live_trade(trade, history, sentiment, market=market)
+
                 
                 if alert:
-                    logger.warning("🚨 ANOMALY DETECTED: %s score=%.2f", trade["symbol"], alert["anomaly_score"])
-                    
-                    # 4. Publish to alerts stream for the UI
-                    await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
-                    
-                    # 5. Persist to Postgres/TimescaleDB without blocking event loop
-                    await asyncio.to_thread(persist_alert_to_db, alert)
-                    
+                    # model_unavailable sentinel: ingested but no trained model yet.
+                    # Log at DEBUG (not WARNING) and skip DB/stream publish.
+                    if alert.get("confidence") == "model_unavailable":
+                        logger.debug(
+                            "No model for market=%s symbol=%s source=%s — coverage pending",
+                            alert.get("market"), alert.get("symbol"), alert.get("source"),
+                        )
+                    elif alert.get("anomaly_score") is not None:
+                        confidence_tag = " [LOW CONFIDENCE — polled data]" if alert.get("low_confidence") else ""
+                        logger.warning(
+                            "🚨 ANOMALY DETECTED: %s score=%.2f%s",
+                            trade["symbol"], alert["anomaly_score"], confidence_tag,
+                        )
+                        # 4. Publish to alerts stream for the UI
+                        await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
+                        # 5. Persist to Postgres/TimescaleDB without blocking event loop
+                        await asyncio.to_thread(persist_alert_to_db, alert)
+
                 # Acknowledge the processed trade
                 await client.xack(STREAM_TRADES, "engine_group", entry_id)
+
                         
         except Exception as e:
             logger.error("Engine loop error: %s", e)
@@ -147,7 +167,7 @@ def persist_alert_to_db(alert: dict) -> None:
             high=alert["price"],
             low=alert["price"],
             close=alert["price"],
-            volume=alert.get("volume", 1.0),
+            volume=alert["volume"],
         )
         db.add(md)
         db.commit()

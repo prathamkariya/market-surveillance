@@ -198,10 +198,15 @@ async def run_yfinance_fallback(poll_interval_s: int = 30) -> None:
                                 is_buyer_maker=None,
                             )
                             
-                            # 1.4: Only publish if primary feed is dead
+                            # 1.4: Only publish if primary feed is dead (>30s silence)
                             if time.time() - last_seen_primary > 30:
                                 entry_id = publish_trade_sync(event)
                                 logger.debug("Published YFINANCE %s → Redis %s", sym, entry_id)
+                            else:
+                                logger.debug(
+                                    "YFINANCE tick suppressed for %s — primary feed alive (%.0fs ago)",
+                                    sym, time.time() - last_seen_primary,
+                                )
                         except Exception as sym_exc:  # noqa: BLE001
                             logger.warning("yfinance error for %s: %s", sym, sym_exc)
 

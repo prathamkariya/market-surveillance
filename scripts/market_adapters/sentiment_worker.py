@@ -176,7 +176,7 @@ async def run_reddit_feed() -> None:
             logger.debug("Published Reddit sentiment for %s (score=%.2f)", symbol, score)
 
     # Run PRAW in a thread pool so it doesn't block the asyncio loop.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _stream_reddit)
 
 

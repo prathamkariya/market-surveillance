@@ -296,7 +296,7 @@ class TestModelRegistrySingletonRace:
                 assert release_load.wait(timeout=5), "test setup error: release_load was never set"
                 super().load()
 
-        monkeypatch.setattr(anomaly_service, "_registry", None)
+        monkeypatch.setattr(anomaly_service, "_registries", {})
         monkeypatch.setattr(anomaly_service, "ModelRegistry", SlowLoadRegistry)
         monkeypatch.setattr(anomaly_service.settings, "MODEL_DIR", str(tmp_path))
 

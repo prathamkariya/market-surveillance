@@ -68,14 +68,31 @@ def test_engine(postgres_url):
 
 @pytest.fixture(scope="session", autouse=True)
 def create_tables(test_engine):
-    """
-    Create all tables once before any test runs.
-    Drop all after the session ends.
+    """Create all tables once before any test runs. Drop all after the session ends.
+
     autouse=True: runs automatically without being listed in test parameters.
+
+    Skips gracefully when Postgres is unreachable so pure unit tests
+    (e.g. test_streaming.py) can run without a running DB. Any test that
+    actually needs a DB will still fail at the db_session fixture level,
+    which is the correct failure point.
     """
-    Base.metadata.create_all(bind=test_engine)
+    try:
+        Base.metadata.create_all(bind=test_engine)
+    except Exception as e:
+        import warnings
+        warnings.warn(
+            f"create_tables: Postgres not reachable ({e}). "
+            "DB-dependent tests will fail; pure unit tests will still run.",
+            stacklevel=1,
+        )
+        yield
+        return
     yield
-    Base.metadata.drop_all(bind=test_engine)
+    try:
+        Base.metadata.drop_all(bind=test_engine)
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════

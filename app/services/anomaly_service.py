@@ -54,40 +54,57 @@ HISTORICAL_FETCH_LIMIT = 30
 
 
 # ──────────────────────────────────────────────
-# Model loading (lazy singleton -- loaded once per process, not once
-# per request. A hot-reload endpoint, matching
-# mkt_surveillance_ml.serving.app's POST /admin/reload, is a natural
-# follow-up if models get retrained while this service is running; not
-# added here to keep this change focused on the mock-to-real swap itself.)
+# Model loading — per-market lazy singletons.
+#
+# Each market gets its own ModelRegistry keyed by market string
+# ("CRYPTO", "US_EQUITY", "INDIA_EQUITY"). Each registry looks in
+# trained_models/<market_lowercase>/ first, then falls back to the
+# root MODEL_DIR so backward-compat is preserved if only one shared
+# model directory exists.
+#
+# Locking discipline (important — do not simplify this):
+#   Locks are pre-initialized for every known market at module load.
+#   A dict lookup on a pre-initialized key is GIL-atomic, so checking
+#   `market in _registries` outside the lock is safe. The lock itself
+#   is only needed to serialize the load() call that populates the
+#   slot. Creating locks lazily (on first use) would re-introduce the
+#   exact race condition that existed before the original single-lock
+#   fix — two threads could simultaneously try to create the lock for
+#   the same market and race on who publishes it.
 # ──────────────────────────────────────────────
-_registry: Optional[ModelRegistry] = None
-_registry_lock = threading.Lock()
+_KNOWN_MARKETS = ("CRYPTO", "US_EQUITY", "INDIA_EQUITY")
+
+_registries: dict[str, ModelRegistry] = {}
+# Pre-initialize one lock per known market at import time, eliminating
+# any race between lock creation and first acquisition.
+_registry_locks: dict[str, threading.Lock] = {
+    m: threading.Lock() for m in _KNOWN_MARKETS
+}
+_fallback_lock = threading.Lock()  # for unknown/unexpected market strings
 
 
-def get_model_registry() -> ModelRegistry:
-    global _registry
-    if _registry is None:
-        # Double-checked locking. Safe in Python because the GIL makes the
-        # _registry reference read/write atomic on either side of the lock
-        # -- the lock is only needed to stop two threads from both doing
-        # the load. Building into `candidate` and only publishing to the
-        # global once .load() has finished (or failed) is what actually
-        # closes the race: a concurrent caller now either gets None-not-yet
-        # (retries the lock) or a fully-loaded/fully-failed registry, never
-        # one that's still mid-load.
-        with _registry_lock:
-            if _registry is None:
-                candidate = ModelRegistry(settings.MODEL_DIR)
+def get_model_registry(market: str = "CRYPTO") -> ModelRegistry:
+    """Return the ModelRegistry for the given market, loading it on first call.
+
+    Thread-safe via double-checked locking with pre-initialized per-market
+    locks. Each market loads from trained_models/<market_lower>/ if that
+    directory exists, falling back to the root MODEL_DIR.
+    """
+    global _registries
+    if market not in _registries:
+        lock = _registry_locks.get(market, _fallback_lock)
+        with lock:
+            if market not in _registries:  # re-check under lock
+                from pathlib import Path
+                market_subdir = Path(settings.MODEL_DIR) / market.lower()
+                model_dir = str(market_subdir) if market_subdir.exists() else settings.MODEL_DIR
+                candidate = ModelRegistry(model_dir)
                 try:
                     candidate.load()
                 except ModelLoadError as e:
-                    # Matches mkt_surveillance_ml.serving.app's philosophy: don't
-                    # crash the whole service because models aren't trained yet.
-                    # detect_anomaly() below checks has_any_model explicitly and
-                    # returns a clear 503, not a silent wrong answer.
-                    logger.warning(f"Model loading failed: {e}")
-                _registry = candidate
-    return _registry
+                    logger.warning("Model loading failed for market=%s: %s", market, e)
+                _registries[market] = candidate
+    return _registries[market]
 
 
 # ──────────────────────────────────────────────
@@ -269,17 +286,30 @@ def score_live_trade(
     historical_trades: list[dict],
     sentiment_score: float,
     threshold: float = DEFAULT_THRESHOLD,
+    market: str = "CRYPTO",
 ) -> dict:
-    """
-    Run anomaly detection on a live streaming tick, using in-memory history.
+    """Run anomaly detection on a live streaming tick, using in-memory history.
     Does not touch the Postgres database at all.
     Returns a dict containing the alert if is_anomaly=True, else None.
-    
+
     Args:
-        trade: The newest tick (dict representation of UnifiedTradeEvent).
+        trade:            The newest tick (dict representation of UnifiedTradeEvent).
         historical_trades: The last 20 ticks for this symbol from Redis.
-        sentiment_score: Fused sentiment score from the live_sentiment stream.
+        sentiment_score:  Fused sentiment score from the live_sentiment stream.
+        threshold:        Anomaly score threshold. Callers may override for testing.
+        market:           Which market model to load ("CRYPTO", "US_EQUITY",
+                          "INDIA_EQUITY"). Used to key the per-market ModelRegistry.
+
+    Low-confidence handling:
+        Ticks where source="YFINANCE" represent 30-second polling fallback, not
+        genuine real-time streaming. They are still scored (coverage is better
+        than silence) but the returned alert is marked low_confidence=True so
+        the UI and any downstream consumers can surface that distinction rather
+        than silently treating a polled candle the same as a live WebSocket tick.
     """
+    source: str = trade.get("source", "")
+    is_low_confidence: bool = source.upper() == "YFINANCE"
+
     # 1. Feature engineering
     all_records = historical_trades + [trade]
     if len(all_records) < MIN_RAW_ROWS_FOR_FEATURES:
@@ -294,7 +324,7 @@ def score_live_trade(
     )
     # Deduplicate exact timestamps by taking the last trade
     df = df[~df.index.duplicated(keep="last")].sort_index()
-    
+
     if len(df) < MIN_RAW_ROWS_FOR_FEATURES:
         return None
 
@@ -305,14 +335,30 @@ def score_live_trade(
     last_row = features_df.iloc[-1]
     features = {col: float(last_row[col]) for col in BASE_FEATURE_COLUMNS}
 
-    # Sentiment fusion is explicitly deferred. 
+    # Sentiment fusion is explicitly deferred.
     # It needs to be a proper input feature to the ML model (retraining required),
     # not a post-hoc rule-based multiplier bolted onto the model's output.
     # See Phase 7 recommendations. We pass it through as metadata for MAR reports.
 
-    # 2. Score with models
-    registry = get_model_registry()
+    # 2. Score with the correct per-market model registry
+    registry = get_model_registry(market=market)
     if not registry.has_any_model:
+        # No trained model for this market yet. For India, this is expected until
+        # Phase 7. Return a sentinel so callers know coverage is missing rather
+        # than silently producing zero alerts.
+        if is_low_confidence or market == "INDIA_EQUITY":
+            return {
+                "event_id": trade["event_id"],
+                "symbol": trade["symbol"],
+                "timestamp_ms": trade["timestamp_ms"],
+                "price": trade["price"],
+                "volume": trade["volume"],
+                "market": market,
+                "source": source,
+                "anomaly_score": None,
+                "confidence": "model_unavailable",
+                "sentiment_score": sentiment_score,
+            }
         return None
 
     isolation_forest_score = None
@@ -341,7 +387,13 @@ def score_live_trade(
         "timestamp_ms": trade["timestamp_ms"],
         "price": trade["price"],
         "volume": trade["volume"],
+        "market": market,
+        "source": source,
         "anomaly_score": combined,
+        # low_confidence=True means the tick came from a polling fallback (YFINANCE),
+        # not a real-time WebSocket stream. Alert is still actionable but should
+        # be surfaced with a visual indicator on the dashboard.
+        "low_confidence": is_low_confidence,
         "sentiment_score": sentiment_score,
         "isolation_forest_score": isolation_forest_score,
         "multi_pattern_max_score": multi_pattern_max_score,
