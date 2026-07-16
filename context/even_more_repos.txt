@@ -1,0 +1,1115 @@
+=== mandapakasanjay28/real-time-market-surveillance-pipeline ===
+
+
+=== aryan1078/indian-equities-market-surveillance-platform ===
+--- START OF README.md ---
+# Indian Equities Market Surveillance Platform
+
+Distributed market surveillance, anomaly detection, contagion analysis, and warehouse analytics for Indian equities. The platform now runs in strict real-data mode: live and recent intraday bars come from real market feeds, older history can use real coarser bars, and replay only re-emits captured real sessions.
+
+## What This System Does
+
+- Ingests real market bars for Indian equities from `yfinance` today, with optional `Upstox` support wired through the same collector contract when credentials are supplied.
+- Captures replay fixtures only from real market sessions; synthetic generators and fake minute expansion are no longer part of the runtime path.
+- Streams normalized market records through Kafka so multiple services can process the same market feed reproducibly.
+- Persists append-heavy operational facts in Cassandra and hot operator state in Redis.
+- Detects price and volume anomalies in near real time using EWMA-based scoring.
+- Detects sector contagion windows and stores those operational events in PostgreSQL.
+- Loads a PostgreSQL star-schema warehouse for historical analysis, rollups, persistence studies, and analyst-friendly querying.
+- Serves a polished operator console and warehouse analyst workbench through a single web application.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["real provider backfill / live collector / captured replay"] --> B["Kafka: market_ticks"]
+    B --> C["Storage consumer"]
+    B --> D["Anomaly engine"]
+    C --> E["Cassandra: market_ticks + latest_market_state"]
+    D --> F["Redis: engine state + live read models"]
+    D --> G["Cassandra: anomaly_metrics"]
+    D --> H["Kafka: anomaly_detections"]
+    H --> I["Contagion engine"]
+    I --> J["PostgreSQL operational schema"]
+    E --> K["ETL"]
+    G --> K
+    J --> K
+    K --> L["PostgreSQL warehouse schema"]
+    J --> M["FastAPI"]
+    L --> M
+    F --> M
+    M --> N["Next.js operator console"]
+```
+
+## Major Product Surfaces
+
+- `Overview`: live tape, current alerts, active sector pressure, top movers, and recent contagion events.
+- `Stocks`: full NSE directory, hydration tracking, stock search, screener views, and per-symbol workspaces.
+- `Contagion`: sector propagation monitoring and recent contagion event investigation.
+- `Warehouse`: analytical rollups, regime summaries, persistence analytics, intraday pressure profiles, and advanced warehouse insights.
+- `Warehouse Analyst`: visual query builder over curated warehouse datasets with charts, CSV export, and print-to-PDF reporting.
+- `Process`: step-by-step explanation of the entire pipeline from ingestion to warehouse analytics.
+- `Methodology`: formulas, thresholds, signal semantics, and alert logic explained in product terms.
+- `Replay`: captured-session replay controls for running the platform outside market hours without leaving real data behind.
+- `System`: health, scale, run history, storage footprint, and operational readiness.
+
+## Data Stores And Their Roles
+
+- `Kafka`: replayable transport for normalized market bars and anomaly detections.
+- `Cassandra`: operational intraday storage for market bars and anomaly metrics.
+- `Redis`: anomaly engine restart state, latest market views, latest anomaly views, and freshness markers.
+- `PostgreSQL operational schema`: ingestion runs, ETL runs, alerts, and contagion events.
+- `PostgreSQL warehouse schema`: stock, sector, date, time, and exchange dimensions plus fact tables and materialized views for analytics.
+
+## Monorepo Layout
+
+- `infra/`: Dockerfiles, Cassandra schema, PostgreSQL init and runtime migrations, and Redis config.
+- `services/collector`: real-data backfill, captured replay, purge, and live polling collectors.
+- `services/storage-consumer`: Kafka-to-Cassandra storage path.
+- `services/anomaly-engine`: streaming anomaly detection and Redis state management.
+- `services/contagion-engine`: sector-aware contagion detection and recompute tooling.
+- `services/api`: FastAPI surface for operational and analytical reads.
+- `services/etl`: warehouse ETL and staging logic.
+- `shared/contracts`: shared Python models, utilities, analytics, and settings.
+- `shared/scripts`: bootstrap, NSE universe sync, local launch, public tunnel launch, and smoke tests.
+- `frontend`: Next.js operator console and analyst UI.
+- `tests`: unit and integration-facing fixtures.
+- `docs`: architecture notes and viva-facing support material.
+
+## Quick Start
+
+### Prerequisites
+
+- Docker Desktop
+- PowerShell
+- Python 3.11+
+
+### Local Setup
+
+1. Copy `.env.example` to `.env`.
+2. Ensure runtime folders exist:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\shared\scripts\bootstrap.ps1
+   ```
+
+3. Create the local virtual environment and install Python dependencies:
+
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\pip install -r requirements.txt
+   ```
+
+4. Start the local stack:
+
+   ```powershell
+   docker compose up -d
+   ```
+
+5. Open:
+
+- Frontend: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+
+## One-Click Local Launch And Public Tunnel
+
+For daily use on Windows, the repo now includes double-click launchers:
+
+- `Launch Market Surveillance.cmd`
+- `Stop Market Surveillance.cmd`
+
+### What The Launcher Does
+
+- bootstraps runtime folders
+- starts the full local Docker stack
+- waits for the API and frontend to become available
+- opens a public tunnel to the local frontend
+- writes the tunnel URL to `tmp/public-url.txt`
+- writes a launch summary to `tmp/launch-summary.json`
+
+### Manual Script Usage
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\shared\scripts\start_stack_and_tunnel.ps1
+```
+
+Useful switches:
+
+- `-Rebuild`: rebuild services before launching
+- `-NoTunnel`: start locally without opening a public URL
+- `-NoBrowser`: do not auto-open the browser
+- `-LiveCollector`: also start the live collector profile
+- `-TunnelProvider localhostrun|cloudflare|auto`: choose the public tunnel method
+
+By default the launcher uses `auto`, which prefers `localhost.run` and falls back to Cloudflare quick tunnels if needed.
+
+### Start On Windows Sign-In
+
+To place the launcher in the Windows Startup folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\shared\scripts\install_startup_shortcut.ps1
+```
+
+To remove that startup shortcut later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\shared\scripts\install_startup_shortcut.ps1 -Remove
+```
+
+## Data Collection Modes
+
+### Captured Replay
+
+Replay is now real-data-only. A fixture must be captured from an actual market session first, and replay simply re-emits those normalized real bars through Kafka, Cassandra, Redis, contagion detection, ETL, and the warehouse layer.
+
+```powershell
+docker compose --profile tooling run --rm collector python -m collector.main replay --fixture tests/fixtures/replay_ticks.real.jsonl --speed 30
+```
+
+To capture a fresh real replay session:
+
+```powershell
+docker compose --profile tooling run --rm collector python -m collector.main capture-replay --symbols RELIANCE.NS HDFCBANK.NS ICICIBANK.NS INFY.NS TCS.NS --period 5d --interval 1m --output tests/fixtures/replay_ticks.real.jsonl
+```
+
+### Live Market Polling
+
+```powershell
+docker compose --profile live up -d collector-live
+```
+
+### Backfill
+
+```powershell
+docker compose --profile tooling run --rm collector python -m collector.main backfill --symbols RELIANCE.NS TCS.NS INFY.NS
+```
+
+Useful backfill switches:
+
+- `--interval 1m|5m|15m|1h|1d`
+- `--period 5d|1mo|3mo|1y`
+- `--start-date YYYY-MM-DD --end-date YYYY-MM-DD`
+- `--persist` to update the default captured real replay file
+
+### Purging Old Synthetic-Derived State
+
+If you are migrating an older mixed-data database, wipe the synthetic-derived operational and warehouse state before reloading:
+
+```powershell
+docker compose --profile tooling run --rm collector python -m collector.main purge-derived
+```
+
+## Warehouse And Analyst Features
+
+The warehouse is not just a reporting dump. It is designed as an analyst-facing consolidation layer.
+
+Current analytical capabilities include:
+
+- minute-grain anomaly facts
+- stock-day anomaly and contagion rollups
+- sector-day and sector-month summaries
+- sector regime analysis
+- stock persistence and recurrence analytics
+- intraday pressure profiling
+- contagion event warehousing
+- interactive analyst query builder
+- CSV export and browser-native PDF report generation
+
+The analyst workbench is available at:
+
+- `http://localhost:3000/warehouse/analyst`
+
+## Testing And Validation
+
+### Backend Unit Tests
+
+```powershell
+docker compose exec api python -m pytest -q
+```
+
+### Frontend Production Build
+
+```powershell
+docker compose exec frontend npm run build
+```
+
+### Full Website Smoke Test
+
+The repo includes a reusable smoke-test harness that checks major pages and core API flows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\shared\scripts\smoke_test_site.ps1
+```
+
+The smoke test covers:
+
+- main UI routes
+- stock directory and stock workspace
+- contagion and warehouse APIs
+- warehouse query metadata and live query execution
+- replay status and system health
+
+## Performance Notes
+
+Recent optimizations in the repo include:
+
+- GZip compression on the FastAPI layer
+- cached warehouse summary and materialized-view endpoints
+- bulk daily-history loading for screener and peer comparison paths
+- homepage data consolidation so the overview route avoids redundant extra requests
+- lighter live tape payloads because company names now ride on the latest market record
+
+## Demo Checklist
+
+For a polished demo, the recommended path is:
+
+1. Start the stack with `Launch Market Surveillance.cmd`
+2. Confirm the public tunnel URL from `tmp/public-url.txt`
+3. Open `Overview` for the live tape and alert queue
+4. Open `Stocks` and search a symbol workspace
+5. Open `Contagion` for sector propagation events
+6. Open `Warehouse` and `Warehouse Analyst`
+7. Open `Process` and `Methodology` for architecture and formula walkthroughs
+8. Use `Replay` if you need an after-hours demo sourced from a captured real session
+
+## Design Principles
+
+- UTC is the system of record for timestamps; IST trading semantics are preserved for business logic and UI.
+- The platform is strict real-data-only at runtime; replay is allowed only for fixtures captured from real sessions.
+- Cassandra is used only for operational write-heavy access patterns, not warehouse-style OLAP.
+- Contagion events are kept relational because they are dashboard- and join-friendly.
+- Warehouse facts are separated by grain rather than mixed into a single ambiguous table.
+- Captured replay is a first-class capability, not an afterthought.
+
+## Contributors
+
+- [aryan1078](https://github.com/aryan1078)
+- [H484811](https://github.com/H484811)
+- [Tathya-25](https://github.com/Tathya-25)
+- [h20250161-sys](https://github.com/h20250161-sys)
+
+--- END OF README.md ---
+
+
+=== Animeshsingh76/trade-surveillance-system ===
+--- START OF README.md ---
+# ?? Trade Surveillance & Anomaly Detection System
+
+A real-time trade surveillance dashboard built using **Python**, **Streamlit**, and a **Machine Learning-ready architecture** to detect suspicious trading activity in financial markets.
+
+
+## ?? Features
+
+- Price anomaly detection (statistical threshold-based)
+- Volume spike detection
+- ML-based anomaly flagging
+- Interactive Streamlit dashboard
+- Sensitivity slider to tune anomaly detection
+- Alert log with rule-based alerts
+- Modular architecture (rules, ML, ingestion layers)
+
+## ?? Dashboard Preview
+
+### ?? Overall Trade Surveillance Dashboard
+![Dashboard Preview](screenshots/Dashboard_Preview.png.png)
+
+### ?? Price & Volume Anomaly Detection
+![Price Volume Chart](screenshots/price_volume_chart.png.png)
+
+### ?? Alerts Log & System Alerts
+![Alerts Log](screenshots/alerts_log.png.png)
+
+
+
+## ?? Why this Project Matters
+
+Trade surveillance is a critical function in investment banks and exchanges to detect:
+- Market manipulation
+- Unusual price or volume movements
+- Suspicious trading patterns
+
+This project simulates a real-world surveillance system used by financial institutions, combining **rule-based logic** with **ML extensibility**.
+
+
+
+## ?? How It Works
+
+1. Trades are generated using synthetic market data
+2. Price and volume patterns are continuously analyzed
+3. Anomalies are detected using:
+   - Standard deviation-based thresholds
+   - Volume spike detection
+   - ML anomaly scoring (extensible)
+4. Alerts are generated and displayed in real time on the dashboard
+
+
+
+## ?? Tech Stack
+
+- Python
+- Streamlit
+- Pandas
+- Matplotlib
+- Scikit-learn
+- Git & GitHub
+
+
+
+## ?? How to Run Locally
+
+```bash
+git clone https://github.com/AnimeshSingh76/trade-surveillance-system.git
+cd trade-surveillance-system
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+
+
+
+
+
+--- END OF README.md ---
+
+
+=== Fifadlika/MLOps-Crypto-Surveillance ===
+--- START OF README.md ---
+# ?? MLOps-Crypto-Surveillance
+
+> Real-time Cryptocurrency Anomaly Detection & Volatility Prediction System based on Continual Learning
+
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![MLflow](https://img.shields.io/badge/MLflow-2.14-orange)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
+---
+
+## ?? About
+ 
+This system is designed for **real-time market surveillance** of cryptocurrency markets with two core capabilities:
+ 
+1. **Anomaly Detection** - Identifies suspicious trading patterns such as wash trading, pump-and-dump schemes, and market manipulation using Isolation Forest
+2. **Volatility Prediction** - Forecasts price volatility across multiple time windows (1h, 4h, 24h) using XGBoost
+**Monitored Trading Pairs:** BTCUSDT, ETHUSDT, BNBUSDT
+ 
+**Data Source:** Binance WebSocket API (real-time) + Binance REST API (primary `api.binance.com`, fallback `api4.binance.com`)
+ 
+---
+ 
+## ??? Directory Structure
+ 
+```
+MLOps-Crypto-Surveillance/
+├── .devcontainer/          # GitHub Codespaces configuration
+│   └── devcontainer.json
+├── config/                 # Project configuration
+│   └── config.yaml         # Model, data, and system parameters
+├── data/
+│   ├── raw/                # Bronze layer - raw klines from Binance REST API (JSONL)
+│   ├── preprocess/         # Silver layer - cleaned/deduplicated output (JSONL)
+│   ├── features/           # Gold layer - engineered feature vectors (Parquet)
+│   └── external/           # External reference data
+├── models/
+│   ├── artifacts/          # Saved model artifacts
+│   └── experiments/        # MLflow experiment results
+├── notebooks/              # Jupyter notebooks for EDA & experiments
+├── src/
+│   ├── ingestion/          # WebSocket & REST API data ingestion
+│   ├── features/           # Feature engineering pipeline
+│   ├── training/           # Model training & retraining logic
+│   ├── serving/            # FastAPI inference service
+│   ├── monitoring/         # Prometheus metrics & alerting
+│   └── utils/              # Helper functions & shared utilities
+├── scripts/
+│   ├── pull_historical.py  # Pulls historical klines from Binance REST API  data/raw/
+│   └── run_featurize.py    # Reads Redis Stream, computes feature vectors  data/features/
+├── tests/
+│   ├── unit/               # Unit tests per module
+│   └── integration/        # End-to-end integration tests
+├── docker/                 # Docker & docker-compose files
+├── dvc.yaml                # DVC pipeline stage definitions
+├── dvc.lock                # Auto-generated - dataset version snapshots (do not edit)
+├── data/VERSION_REGISTRY.yaml  # Human-readable data version changelog
+├── .env.example            # Environment variables template
+├── requirements.txt        # Python dependencies
+└── README.md
+```
+ 
+---
+ 
+## ?? Getting Started with GitHub Codespaces
+ 
+### Prerequisites
+- GitHub account with Codespaces access
+- (Optional) Binance API Key for real-time data access
+### Step 1: Open Codespaces
+```
+Click the "Code" button on the repo  "Codespaces" tab  "Create codespace on main"
+Environment will be automatically configured in ~2-3 minutes
+```
+ 
+### Step 2: Setup Environment Variables
+```bash
+cp .env.example .env
+nano .env   # fill in Binance API key, database credentials, etc.
+```
+ 
+### Step 3: Sync Environment
+```bash
+uv sync --dev
+source .venv/bin/activate
+```
+ 
+### Step 4: Start Redis
+```bash
+docker compose -f docker/docker-compose.yml up -d redis
+```
+ 
+---
+ 
+## ?? Data Versioning with DVC
+ 
+This project uses [DVC](https://dvc.org) to version datasets separately from source code. Instead of storing raw data in Git, DVC stores an MD5 hash pointer (`dvc.lock`) for each dataset. Every dataset snapshot is therefore tied to a specific Git commit, making any historical state fully reproducible.
+ 
+### How it works
+ 
+```
+git commit  ──contains──?  dvc.lock  ──points to──?  actual data files
+                              │
+                              └─ MD5 hash changes whenever data changes
+                                  new commit = new dataset version
+```
+ 
+### DVC Pipeline Stages
+ 
+The pipeline is defined in `dvc.yaml` with two stages that map to the data layer architecture:
+ 
+```
+┌─────────────────────────────────────────────────┐
+│  Stage: ingest                                   │
+│  cmd: python scripts/pull_historical.py          │
+│       --days 1 --interval 1m                     │
+│  out: data/raw/          (Bronze layer)          │
+└──────────────────────┬──────────────────────────┘
+                       │ dep
+                       
+┌─────────────────────────────────────────────────┐
+│  Stage: featurize                                │
+│  cmd: python scripts/run_featurize.py            │
+│       --idle-rounds 3                            │
+│  out: data/features/     (Gold layer)            │
+└─────────────────────────────────────────────────┘
+```
+ 
+The `featurize` stage only re-runs when `data/raw` changes - DVC detects this automatically from the MD5 hash, not file timestamps.
+ 
+---
+ 
+### Adding a New Data Version
+ 
+Follow these steps every time new data is ingested (e.g. after each scheduled pipeline run):
+ 
+#### Step 1: Run the pipeline
+ 
+```bash
+dvc repro
+```
+ 
+This runs both stages in dependency order: `ingest` first, then `featurize`. DVC skips any stage whose inputs have not changed. On completion, `dvc.lock` is updated automatically with the new MD5 hashes.
+ 
+Expected output:
+ 
+```
+Running stage 'ingest':
+> python scripts/pull_historical.py --days 1 --interval 1m
+  √ BTCUSDT: 1439 klines written  (data/raw/BTCUSDT/YYYY-MM-DD.jsonl)
+  ...
+Updating lock file 'dvc.lock'
+ 
+Running stage 'featurize':
+> python scripts/run_featurize.py --idle-rounds 3
+  Flushed N records to data/features/{symbol}/YYYY-MM-DD_fv1.0.parquet
+  ...
+Updating lock file 'dvc.lock'
+```
+ 
+#### Step 2: Verify what changed
+ 
+```bash
+dvc diff
+```
+ 
+This compares the current dataset state against the last committed `dvc.lock`. Output is grouped into `Added`, `Deleted`, and `Modified` files. Confirm that:
+- New date-stamped files appear under `data/raw/{SYMBOL}/` and `data/features/` (Added)
+- No existing date files were overwritten (data is append-only by design)
+- `.bloom` filter files changed - this confirms the deduplication index was updated
+```bash
+dvc diff --show-hash
+```
+ 
+Use this to inspect the exact MD5 hash change for each directory. The hash difference between versions is the ground truth for what changed in the dataset.
+ 
+#### Step 3: Update `VERSION_REGISTRY.yaml`
+ 
+Open `data/VERSION_REGISTRY.yaml` and add a new entry. This file is the human-readable counterpart to `dvc.lock` - it records the context behind each version for the team.
+ 
+```yaml
+# data/VERSION_REGISTRY.yaml
+versions:
+  - version: "v1.0.3"
+    date: "2026-05-15"
+    description: "Daily snapshot - all 3 pairs, appended 2026-05-15 klines"
+    changed_fields: []
+    model_compatibility:
+      isolation_forest: ">=v1.0"
+      xgboost: ">=v1.0"
+    breaking_change: false
+```
+ 
+> **Field guide:**
+> - `changed_fields` - list any feature vector fields added, removed, or renamed. Leave empty `[]` if schema is unchanged.
+> - `model_compatibility` - minimum model version that is still valid against this dataset. Update this when a breaking change occurs.
+> - `breaking_change: true` - set this when feature dimensions change; existing models must be retrained before use.
+ 
+#### Step 4: Commit the new version
+ 
+```bash
+git add dvc.lock data/VERSION_REGISTRY.yaml
+git commit -m "feat(data): daily snapshot YYYY-MM-DD - 3 pairs"
+git tag data-v1.0.3
+git push origin main --tags
+```
+ 
+Tagging the commit is important - it creates a named checkpoint that can be restored exactly (see [Restoring a Previous Version](#restoring-a-previous-version) below).
+ 
+---
+ 
+### Checking Pipeline Status
+ 
+```bash
+# Is dvc.lock consistent with the current data files?
+dvc status
+```
+ 
+Expected when up-to-date:
+```
+Data and pipelines are up to date.
+```
+ 
+If files have changed since the last `dvc repro`, `dvc status` will list the affected stages. Re-run `dvc repro` to bring the lock file back in sync before committing.
+ 
+---
+ 
+### Restoring a Previous Version
+ 
+Because every `dvc.lock` is committed to Git, any past dataset state can be recovered:
+ 
+```bash
+# Switch code and dvc.lock to a previous tag
+git checkout data-v1.0.1
+ 
+# Restore the actual data files to match that dvc.lock
+dvc checkout
+```
+ 
+This is the primary reproducibility guarantee: to retrain a model on the exact data used in a past experiment, check out the corresponding Git commit and run `dvc checkout`. The dataset will be identical to what was used at that point in time.
+ 
+---
+ 
+### Active Dataset Versions
+ 
+| Tag | Commit | Description |
+|-----|--------|-------------|
+| `data-v1.0.0` | `03bedca` | Initial DVC pipeline + dataset |
+| `data-v1.0.1` | `6744bdb` | Daily snapshot 2026-05-06 - 3 pairs |
+| `data-v1.0.2` | `dcaa6b3` | Extended to 2026-05-10 |
+| `data-v1.0.3` | `17e9e51` | Daily snapshot 2026-05-14 *(current)* |
+ 
+For the full changelog including schema changes and model compatibility notes, see [`data/VERSION_REGISTRY.yaml`](data/VERSION_REGISTRY.yaml).
+
+---
+
+## Running Experiments
+
+```bash
+# Single run
+python src/training/train.py --symbol BTCUSDT --model anomaly --contamination 0.05
+
+# View MLflow UI
+mlflow ui --backend-store-uri mlflow/ --port 5000
+# Open http://localhost:5000
+```
+---
+ 
+## ??? System Architecture
+ 
+```
+Binance WebSocket API          Binance REST API
+        │                              │
+                                      
+  WebSocket Client          Batch Sync Service (*/6hr)
+        │                              │
+        └──────────┬───────────────────┘
+                   
+            Redis Streams
+          (raw_trades, raw_klines, raw_tickers)
+                   │
+                   
+      Feature Engineering Service
+      (Rolling windows: 5m, 15m, 1h, 4h)
+                   │
+                   
+           Redis Feature Store
+                   │
+          ┌────────┴────────┐
+                           
+   Isolation Forest      XGBoost
+  (Anomaly Detection) (Volatility Pred)
+          │                 │
+          └────────┬────────┘
+                   
+            FastAPI Service
+         (Champion/Challenger A/B)
+                   │
+                   
+            Redis Stream
+          (predictions output)
+                   │
+        ┌──────────┴──────────┐
+                             
+   Alert Service          Dashboard
+  (Slack/PagerDuty)    (Grafana/Prometheus)
+```
+ 
+---
+ 
+## ?? Tech Stack
+ 
+| Component | Technology |
+|-----------|------------|
+| Data Ingestion | WebSocket-client (Python) + Redis Streams |
+| Feature Store | Redis (in-memory) + PostgreSQL (persistent) |
+| Model Training | Scikit-learn (Isolation Forest) + XGBoost |
+| Model Registry | MLflow |
+| Model Serving | FastAPI (Python async) |
+| Monitoring | Prometheus + Grafana |
+| Alerting | Slack API + PagerDuty API |
+| Orchestration | Python scripts + Cron |
+| Deployment | Docker Compose |
+ 
+---
+ 
+## ?? Success Metrics
+ 
+### Model Performance
+| Metric | Target |
+|--------|--------|
+| Anomaly Detection Precision | ≥ 0.75 |
+| Anomaly Detection Recall | ≥ 0.70 |
+| F1-Score | ≥ 0.72 |
+| Volatility Prediction MAE | ≤ 15% |
+ 
+### System Performance
+| Metric | Target |
+|--------|--------|
+| Inference Latency (p95) | < 100ms |
+| Data Freshness | < 5 seconds |
+| Pipeline Uptime | ≥ 99.5% |
+| Retraining Success Rate | ≥ 95% |
+ 
+---
+ 
+## ?? Branching Strategy (GitHub Flow)
+ 
+```
+main (always stable & deployable)
+  │
+  ├── feat/      New features
+  ├── fix/       Bug fixes
+  ├── exp/       ML experiments
+  ├── docs/      Documentation
+  └── refactor/  Code refactoring
+```
+ 
+**Rules:**
+- `main` is only updated via Pull Requests
+- Every branch must be reviewed before merging
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) format
+---
+ 
+## ?? Commit Message Convention
+ 
+```
+feat(data): daily snapshot YYYY-MM-DD - 3 pairs
+feat: add websocket ingestion service
+fix: handle reconnection on websocket timeout
+exp: tune isolation forest contamination parameter
+docs: update README data versioning instructions
+refactor: extract feature engineering to separate module
+test: add unit tests for volatility calculator
+```
+ 
+---
+ 
+## ?? License
+ 
+This project is licensed under the MIT License.
+ 
+
+--- END OF README.md ---
+
+
+=== mam474-nm-gdl/kalshi-surveillance-demo ===
+--- START OF README.md ---
+# Event-Contract Market Surveillance - Anomaly Detection (Python + SQL)
+
+A self-contained demo that **simulates a Kalshi-style event-contract order book**, **injects five
+classic market-abuse patterns**, and **detects them with SQL + Python** - then scores each detector
+against known ground truth (precision & recall).
+
+Built as a market-integrity learning project to practice the core surveillance-analyst loop:
+**define normal  detect deviations  investigate  document  measure.**
+
+> The contract is a binary YES/NO event priced 1-99¢ (mirroring Kalshi's product). All data is
+> synthetic and generated locally - no real market data is used.
+
+---
+
+## What it catches
+
+| # | Typology | Detection logic (SQL) | Precision | Recall |
+|---|----------|------------------------|:---------:|:------:|
+| 1 | **Wash trading** | Buyer & seller share the same linked KYC group | 1.00 | 1.00 |
+| 2 | **Spoofing** | Large limit orders cancelled <2s, never filled, isolated from bursts | 0.94 | 1.00 |
+| 3 | **Layering** | 3+ same-side orders across price levels within 5s, then cancelled | 1.00 | 1.00 |
+| 4 | **Momentum ignition** | One account aggresses 5+ same-direction trades in 60s, moving price | 1.00 | 1.00 |
+| 5 | **Pre-news / insider runup** | Outsized directional positioning in the 10 min before a settlement event | 1.00 | 1.00 |
+
+*Scores are measured against the injected `labels` table - see `src/run_detections.py`.*
+
+![Trade tape with flagged abuse windows](figures/fig_price_timeline.png)
+
+![Detector precision and recall](figures/fig_scorecard.png)
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/<your-username>/kalshi-surveillance-demo.git
+cd kalshi-surveillance-demo
+pip install -r requirements.txt
+
+python src/simulate_market.py     # 1. generate synthetic market -> data/market.db + CSVs
+python src/run_detections.py      # 2. run SQL detections + print the scorecard
+python src/make_figures.py        # 3. (optional) regenerate the README charts
+```
+
+Or open the walkthrough notebook:
+
+```bash
+jupyter notebook notebook/surveillance_analysis.ipynb
+```
+
+`sqlite3` ships with Python's standard library, so the **SQL layer needs no install** - the only
+third-party packages are pandas, numpy, matplotlib, and jupyter (see `requirements.txt`).
+
+---
+
+## How it works
+
+```
+src/simulate_market.py   Builds a mean-reverting price path with two-sided legit flow, then injects
+                         five abuse patterns. Every abuse row is tagged in the `labels` table so the
+                         detectors can be scored. Writes SQLite + CSV.
+
+sql/detections.sql       One named query per typology. Thresholds are explicit and tunable - in a
+                         real system these are compliance-reviewed parameters, not magic numbers.
+
+src/run_detections.py    Executes each query, prints the alerts with human-readable reasons, and
+                         computes precision / recall vs. ground truth.
+
+src/make_figures.py      Renders the two charts above.
+
+notebook/                Annotated end-to-end walkthrough.
+```
+
+### Schema
+
+- **orders** - `order_id, ts, account_id, side, price, size, action(place|cancel|fill), order_type`
+- **trades** - `trade_id, ts, price, size, buy_account, sell_account, aggressor_side`
+- **accounts** - `account_id, kyc_name, linked_group, opened_days_ago`
+- **news_events** - `event_id, ts, ticker, headline, expected_impact`
+- **labels** - ground-truth `(entity_type, entity_id, typology)` for scoring
+
+---
+
+## Design notes & honest limitations
+
+- These are **rules-based first-pass screens**. A production surveillance stack layers statistical
+  baselining (per-account z-scores), cross-market/account linkage analysis, and human review on top.
+- Thresholds here are illustrative. Real thresholds are tuned against historical alert dispositions
+  to balance analyst workload against missed abuse.
+- The most interesting engineering detail is **signal de-confliction**: the spoofing query explicitly
+  excludes same-second order bursts so it doesn't double-count *layering* - overlapping signals are a
+  real operational problem, not a footnote.
+
+### Next steps
+- Per-account behavioral baselining instead of global thresholds
+- An alert dedup / triage layer with severity scoring
+- Backtesting thresholds against labeled historical dispositions
+- Cross-account collusion graphs (shared funding, IP, timing)
+
+---
+
+*Author: Mireya Macías · MIT License · Educational project, not affiliated with Kalshi.*
+
+--- END OF README.md ---
+
+
+=== LeeJaeJun-A/snowflake-order-book-surveillance ===
+
+
+=== JayParihar2110/SEBI-Pratyaksh ===
+--- START OF README.md ---
+<h1 align="center">Pratyaksh &nbsp;·&nbsp; ?????????</h1>
+<p align="center"><b>Synthetic-Media Surveillance for India's Capital Markets</b></p>
+<p align="center"><i>A multi-agent AI pipeline that detects synthetic media used to manipulate markets - and converts every detection into a citable, executable regulatory action inside the statutory takedown window.</i></p>
+
+<p align="center">
+  <img alt="theme" src="https://img.shields.io/badge/Problem-AI--Driven%20Detection%20of%20Synthetic%20Media-1C3E75">
+  <img alt="event" src="https://img.shields.io/badge/SEBI%20TechSprint-GFF%202026-8B1E1E">
+  <img alt="license" src="https://img.shields.io/badge/License-MIT-2E6B4F">
+  <img alt="demo" src="https://img.shields.io/badge/Demo-Runs%20Offline-brightgreen">
+</p>
+
+---
+
+## Why this exists
+
+- **Jan 2026 - BSE CEO deepfake.** A fabricated video of BSE's CEO offered "exclusive stock tips" on Telegram. BSE was forced into two advisories.
+- **Nov 2025 - SEBI's own warning.** SEBI formally flagged a surge in social-media scams using executive impersonation.
+- **Feb 2026 - IT Rules Amendment.** India now mandates a **180-minute** takedown of flagged synthetic media.
+- **Apr 24 - Jun 25 - enforcement wave.** SEBI actioned **886 entities** for market manipulation and deceptive reporting.
+
+**The regulator's own thesis:** transition from reactive forensic auditing to *proactive, predictive* multi-channel correlation - "unusual equity volume spikes with real-time semantic analysis of social media trends."
+
+Pratyaksh operationalises that thesis.
+
+## The core insight
+
+Deepfake detection alone is not market surveillance. Market-manipulation signals alone are not synthetic-media detection. Existing systems monitor one or the other. **Pratyaksh fuses them.**
+
+- Any single signal is suggestive.
+- A **face-swap + voice clone + impersonated claim + coordinated volume spike** together forms an actionable **PFUTP trigger** - with an audit-ready evidence bundle.
+
+## The system
+
+A supervised team of seven agents. One supervisor. One compliance gate. One shared evidence log.
+
+| Agent | Role |
+|---|---|
+| **Ingest** | Normalises inputs across social, news, ads and exchange feeds |
+| **Vision Forensics** | Face-swap detection, GAN/diffusion residuals, temporal artefacts |
+| **Audio Forensics** | Voice-clone detection, spectral & prosody analysis, vocoder fingerprints |
+| **Context & NLP** | Claim extraction, entity linking, template matching against known scams |
+| **Market Correlator** | Volume σ, social velocity σ, options-anomaly detection - *the crime layer* |
+| **Supervisor** | Weighted fusion into a composite verdict with rationale |
+| **Compliance** | Maps verdict to SEBI Act, PFUTP Regs, IT Rules 2026; drafts 3A takedown packet |
+
+Full diagram in [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## ? Run it
+
+### 1. The live demo (no install)
+Open **[`frontend/index.html`](frontend/index.html)** in any browser - or host on GitHub Pages. Choose a scenario, press **Run investigation**, and watch a real editorial-grade surveillance console - the seven agents animate on the left, four forensic signals fill in evidence in the centre, a market-correlation chart shows the fusion moment, and the compliance clock counts down against the statutory 3A deadline.
+
+### 2. The backend (pure Python, no deps)
+```bash
+python -m backend.app   # runs all 3 scenarios, prints the full evidence log
+```
+Optional HTTP surface:
+```bash
+pip install -r requirements.txt
+uvicorn backend.app:api --reload
+curl -X POST localhost:8000/investigate -H 'content-type: application/json' -d '{"scenario":"bse"}'
+```
+
+---
+
+## Three seeded scenarios
+
+- **`bse`** - Deepfake video of BSE CEO offering "exclusive stock tips" on Telegram. Two named tickers already moving pre-market. *Composite verdict 0.96  3A packet in under 5 minutes.*
+- **`minister`** - Fabricated ad of India's Finance Minister endorsing a fictional "SEBI-approved 12% guaranteed return" scheme. Meta Ads + WhatsApp fanout, 1.1M impressions. *Composite verdict 0.98  emergency takedown + PSP freeze recommendation.*
+- **`filing`** - Forged BSE outcome-of-board-meeting PDF announcing a fictitious acquisition. Stock +6.4% intraday, unusual OTM call buying. *Composite verdict 0.93  alert to BSE-ISD for possible trading-halt review.*
+
+---
+
+## What makes it shippable inside a regulator
+
+- **Every action carries a citation** - SEBI Act 11(1), PFUTP Reg 3 & 4, Surveillance Master Circular (May 2026), IT Rules 2026 3A, and SEBI's own Nov 2025 advisory.
+- **Compliance is a gate, not a guideline** - no takedown drafts fire below the action threshold.
+- **Explainable and auditable** - the entire investigation is an append-only evidence log a SEBI investigator can reconstruct step-by-step.
+- **Human-in-the-loop by default** - the tool drafts; a designated officer authorises.
+- **Sovereign-ready** - LLM interface is pluggable; deploy on-prem / sovereign-cloud, PII minimised.
+
+## Alignment with SEBI's mandate (per TechSprint criteria)
+
+| Criterion | Pratyaksh |
+|---|---|
+| **Market Impact** | Protects retail investors from PFUTP-classified synthetic-media manipulation |
+| **Technology Stack** | Multi-modal forensics (vision + audio + NLP) + market-signal fusion + agentic RAG |
+| **Feasibility** | Modular agent contracts; each specialist swappable; on-prem deployable |
+| **Scalability** | Stateless specialists; horizontally scales across streams and languages |
+| **SEBI mandate** | Investor protection **and** market development **and** supervision - all three |
+
+## Repo layout
+```
+frontend/index.html           editorial live console (offline, zero-dep)
+backend/core.py               EvidenceLog, Case, base Agent
+backend/agents/forensics.py   Vision · Audio · Context · Market specialists
+backend/agents/supervisor.py  Supervisor + Compliance gate
+backend/app.py                CLI runner + optional FastAPI /investigate
+docs/architecture.md          full diagram, control flow, path to production
+```
+
+## Roadmap
+**Now:** working multi-agent prototype (this repo). **0-3 mo:** SEBI Innovation Sandbox pilot on masked historical incidents. **3-9 mo:** live deployment behind SEBI ISD; wire real model heads (AASIST / Xception / wav2vec). **12 mo:** Bharat-wide coverage, 15 languages, cross-exchange federation.
+
+<p align="center"><sub>Built for the SEBI Securities Market TechSprint @ Global Fintech Fest 2026 - advancing SEBI's transition from reactive forensic auditing to proactive, predictive surveillance.</sub></p>
+
+--- END OF README.md ---
+
+
+=== aryansingh2206/MarketGuard ===
+--- START OF README.md ---
+
+
+#  MarketGuard - Real-Time Trading Anomaly Detection System
+
+## ?? Overview
+
+**MarketGuard** is a real-time market surveillance system that detects anomalous trading behavior using **stream processing, stateful analytics, and ML-inspired scoring**.
+It ingests high-frequency trade events, analyzes them in real time, and publishes detected anomalies for downstream monitoring and visualization.
+
+The system is designed to be **low-latency, scalable, and production-aligned**, closely mirroring architectures used in financial data engineering teams.
+
+---
+
+## ?? Problem Statement
+
+Financial markets generate **millions of trade events per second**.
+Detecting abnormal patterns such as **price spikes, volume surges, or suspicious trading activity** requires:
+
+* Real-time processing (not batch)
+* Stateful analysis per asset
+* Fault-tolerant, scalable pipelines
+* Explainable anomaly detection logic
+
+Traditional databases or batch jobs are insufficient for this workload.
+
+---
+
+## ?? High-Level Architecture
+
+```
+Trade Generator (Python)
+        
+     Kafka (raw_trades)
+        
+   Flink (Stateful Stream Processing)
+        
+ Kafka (anomalies)
+        
+ Monitoring / Dashboards
+```
+
+---
+
+## ?? Key Technologies Used
+
+| Layer             | Technology              | Purpose                         |
+| ----------------- | ----------------------- | ------------------------------- |
+| Event Generation  | Python (multi-threaded) | Simulate market trades          |
+| Messaging         | Apache Kafka            | High-throughput event streaming |
+| Stream Processing | Apache Flink            | Stateful real-time analytics    |
+| State Management  | Flink Keyed State       | Rolling statistics per symbol   |
+| Anomaly Detection | Rule + ML-style scoring | Detect abnormal behavior        |
+| Metrics           | Flink Metrics API       | TPS, anomaly rate               |
+| Deployment        | Docker Compose          | Local cluster simulation        |
+
+---
+
+## ?? Data Flow
+
+1. **Trade Generator**
+
+   * Multi-threaded Python producers generate realistic trades
+   * Supports configurable throughput and anomaly injection
+   * Publishes events to Kafka topic `raw_trades`
+
+2. **Stream Processing (Flink)**
+
+   * Consumes trades from Kafka
+   * Partitions stream by stock symbol
+   * Maintains rolling statistics per symbol using keyed state
+   * Computes anomaly scores in real time
+
+3. **Anomaly Output**
+
+   * Only anomalous trades are published to Kafka topic `anomalies`
+   * Enables downstream consumers (alerts, dashboards, storage)
+
+---
+
+## ?? Anomaly Detection Logic
+
+### Rolling Statistics (Per Symbol)
+
+* Average price
+* Average volume
+* Event count (warm-up threshold)
+
+### ML-Style Scoring (Real-Time)
+
+Instead of running heavy ML models inside the stream, the system uses a **distilled scoring approach** derived from offline ML experimentation:
+
+```
+price_score  = |price - avg_price| / avg_price
+volume_score = volume / avg_volume
+
+anomaly_score = (0.6 x price_score) + (0.4 x volume_score)
+```
+
+### Anomaly Condition
+
+```
+if anomaly_score > 3.0  anomaly
+```
+
+This approach provides:
+
+* Sub-millisecond latency
+* Deterministic behavior
+* Easy explainability
+* Production-friendly performance
+
+---
+
+## ?? Metrics & Observability
+
+The system uses **Flink's native metrics system** to expose real-time operational insights:
+
+| Metric            | Type    | Description              |
+| ----------------- | ------- | ------------------------ |
+| `trades_total`    | Counter | Total processed trades   |
+| `anomalies_total` | Counter | Total detected anomalies |
+| `trades_rate`     | Meter   | Trades per second        |
+| `anomalies_rate`  | Meter   | Anomalies per second     |
+
+
+--- END OF README.md ---
+
+

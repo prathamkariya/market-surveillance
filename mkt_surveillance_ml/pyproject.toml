@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mkt-surveillance-ml"
+version = "0.2.0"
+description = "Market Surveillance ML: feature engineering, classical ML, anomaly detection, and time series (ARIMA/Prophet/LSTM) for manipulation detection"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "scipy>=1.11",
+    "xgboost>=2.0",
+    "statsmodels>=0.14",
+    "prophet>=1.1",
+    "tensorflow-cpu>=2.15",
+    "joblib>=1.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

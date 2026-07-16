@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # ── TimescaleDB (drop-in Postgres replacement, fully compatible with existing schema) ──
+  db:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: market_surveillance
+    ports:
+      - "5433:5432"          # same port as before — existing code unchanged
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 5
+
+  # ── Redis Streams (ingestion queue for live ticks) ──
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  # ── FastAPI application (unchanged) ──
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/market_surveillance
+      - SECRET_KEY=dev_secret_key_change_me
+      - MODEL_DIR=/app/trained_models
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./mkt_surveillance_ml:/mkt_surveillance_ml
+
+volumes:
+  postgres_data:

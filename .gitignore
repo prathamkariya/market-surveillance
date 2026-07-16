@@ -5,10 +5,18 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 
 # Virtual environment (never commit this)
 venv/
 env/
+.venv/
+
+# Packaging / build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
 
 # Database files
 *.db
@@ -25,3 +33,12 @@ Thumbs.db
 # Test coverage reports
 htmlcov/
 .coverage
+.coverage.*
+
+# Pytest cache
+.pytest_cache/
+
+# mypy / type checkers
+.mypy_cache/
+
+.agents
