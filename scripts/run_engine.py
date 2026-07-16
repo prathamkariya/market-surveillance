@@ -39,17 +39,13 @@ HISTORY_PREFIX = "history:"
 
 async def get_latest_sentiment(client, symbol: str) -> float:
     """Fetch the most recent sentiment score for a symbol."""
-    # In a production app, we'd query a Redis Hash maintained by the sentiment worker.
-    # For now, we will just scan the tail of the sentiment stream.
-    res = await client.xrevrange(STREAM_SENTIMENT, max="+", min="-", count=10)
-    for _entry_id, fields in res:
-        try:
-            ev = json.loads(fields["data"])
-            if ev["symbol"] == symbol:
-                return float(ev["sentiment_score"])
-        except Exception:
-            pass
-    return 0.0
+    val = await client.hget("latest_sentiment", symbol)
+    if val is None:
+        return 0.0
+    try:
+        return float(val)
+    except ValueError:
+        return 0.0
 
 
 async def update_and_get_history(client, trade: dict) -> list[dict]:
@@ -67,64 +63,81 @@ async def update_and_get_history(client, trade: dict) -> list[dict]:
 
 
 async def run():
-    logger.info("Starting ML Inference Engine ...")
+    logger.info("Initializing ML Engine...")
+    await setup_consumer_group("engine_group")
+    
     client = get_async_redis()
     
-    # We use a blocking XREAD loop starting from the end of the stream ("$")
-    last_id = "$"
-    
+    logger.info("Engine listening for live trades...")
     while True:
         try:
-            # Block for up to 1 second waiting for new trades
-            results = await client.xread({STREAM_TRADES: last_id}, count=50, block=1000)
-            
-            if not results:
+            batch = await read_trades_blocking(group_name="engine_group", consumer_name="engine_1", count=50, block_ms=2000)
+            if not batch:
                 continue
+            
+            for entry_id, trade in batch:
+                # 1. Update history
+                history = await update_and_get_history(client, trade)
                 
-            for stream_name, entries in results:
-                for entry_id, fields in entries:
-                    last_id = entry_id
+                # 2. Get sentiment
+                sentiment = await get_latest_sentiment(client, trade["symbol"])
+                
+                # 3. Score
+                alert = score_live_trade(trade, history, sentiment)
+                
+                if alert:
+                    logger.warning("🚨 ANOMALY DETECTED: %s score=%.2f", trade["symbol"], alert["anomaly_score"])
                     
-                    try:
-                        trade = json.loads(fields["data"])
-                    except Exception as e:
-                        logger.error("Failed to parse trade: %s", e)
-                        continue
-                        
-                    # 1. Update history
-                    history = await update_and_get_history(client, trade)
+                    # 4. Publish to alerts stream for the UI
+                    await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
                     
-                    # 2. Get sentiment
-                    sentiment = await get_latest_sentiment(client, trade["symbol"])
+                    # 5. Persist to Postgres/TimescaleDB without blocking event loop
+                    await asyncio.to_thread(persist_alert_to_db, alert)
                     
-                    # 3. Score
-                    alert = score_live_trade(trade, history, sentiment)
-                    
-                    if alert:
-                        logger.warning("🚨 ANOMALY DETECTED: %s score=%.2f", trade["symbol"], alert["anomaly_score"])
-                        
-                        # 4. Publish to alerts stream for the UI
-                        await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
-                        
-                        # 5. Persist to Postgres/TimescaleDB (synchronously in a thread pool ideally, 
-                        # but we do it directly here for simplicity in this demo worker).
-                        persist_alert_to_db(alert)
+                # Acknowledge the processed trade
+                await client.xack(STREAM_TRADES, "engine_group", entry_id)
                         
         except Exception as e:
             logger.error("Engine loop error: %s", e)
             await asyncio.sleep(1)
 
 
+def _get_or_create_system_user(db) -> User:
+    """Fetch or safely create a dedicated system user for streaming alerts."""
+    from sqlalchemy.exc import IntegrityError
+    
+    SYSTEM_EMAIL = "system_surveillance@example.com"
+    user = db.query(User).filter(User.email == SYSTEM_EMAIL).first()
+    if user:
+        return user
+        
+    try:
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        user = User(
+            email=SYSTEM_EMAIL,
+            hashed_password=pwd_context.hash("system_password_not_used"),
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        db.rollback()
+        return db.query(User).filter(User.email == SYSTEM_EMAIL).first()
+
 def persist_alert_to_db(alert: dict) -> None:
     """Save the anomaly to TimescaleDB for audit/MAR generation."""
     db = SessionLocal()
     try:
-        # We need a system user to own streaming data, or default to user 1.
-        user = db.query(User).first()
+        user = _get_or_create_system_user(db)
         if not user:
             return
             
-        # Create a raw MarketData record so Anomaly has a parent
+        # Create a raw MarketData record so Anomaly has a parent.
+        # Note: We intentionally map point-in-time tick price to all OHLC fields
+        # because this is a single tick, not an aggregated candle.
         from datetime import datetime, timezone
         md = MarketData(
             user_id=user.id,
@@ -134,7 +147,7 @@ def persist_alert_to_db(alert: dict) -> None:
             high=alert["price"],
             low=alert["price"],
             close=alert["price"],
-            volume=trade_volume_from_id(alert),  # mock volume since it's just a tick
+            volume=alert.get("volume", 1.0),
         )
         db.add(md)
         db.commit()
@@ -156,12 +169,6 @@ def persist_alert_to_db(alert: dict) -> None:
         db.rollback()
     finally:
         db.close()
-
-
-def trade_volume_from_id(alert: dict) -> float:
-    # Just a helper to extract volume since we didn't pass it in the alert payload
-    # In a real app we'd pass it inside `alert`
-    return 1.0
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: market_surveillance
     ports:
-      - "5433:5432"          # same port as before — existing code unchanged
+      - "5432:5432"          # Standard port for local tooling
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +45,6 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
-      - ./mkt_surveillance_ml:/mkt_surveillance_ml
 
 volumes:
   postgres_data:

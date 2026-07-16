@@ -59,7 +59,9 @@ class UnifiedTradeEvent(BaseModel):
 
     @classmethod
     def build_event_id(cls, source: str, symbol: str, timestamp_ms: int) -> str:
-        return f"{source}_{symbol}_{timestamp_ms}"
+        import uuid
+        suffix = uuid.uuid4().hex[:8]
+        return f"{source}_{symbol}_{timestamp_ms}_{suffix}"
 
 
 class SentimentSource(str, Enum):

@@ -305,8 +305,10 @@ def score_live_trade(
     last_row = features_df.iloc[-1]
     features = {col: float(last_row[col]) for col in BASE_FEATURE_COLUMNS}
 
-    # Inject sentiment as a raw override / multiplier or keep it separate for the MAR.
-    # We will pass sentiment directly to the final alert payload.
+    # Sentiment fusion is explicitly deferred. 
+    # It needs to be a proper input feature to the ML model (retraining required),
+    # not a post-hoc rule-based multiplier bolted onto the model's output.
+    # See Phase 7 recommendations. We pass it through as metadata for MAR reports.
 
     # 2. Score with models
     registry = get_model_registry()
@@ -338,6 +340,7 @@ def score_live_trade(
         "symbol": trade["symbol"],
         "timestamp_ms": trade["timestamp_ms"],
         "price": trade["price"],
+        "volume": trade["volume"],
         "anomaly_score": combined,
         "sentiment_score": sentiment_score,
         "isolation_forest_score": isolation_forest_score,

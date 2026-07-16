@@ -31,7 +31,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from app.schemas.streaming import SentimentSource, UnifiedSentimentEvent
-from app.services.redis_service import publish_trade_sync  # reuse sync pattern
+from app.services.redis_service import publish_sentiment_sync
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,16 +79,7 @@ def _extract_symbol(text: str) -> Optional[str]:
     return None
 
 
-def _publish_sentiment_sync(event: UnifiedSentimentEvent) -> None:
-    """Synchronous helper — sentiment_worker uses a sync PRAW loop."""
-    from app.services.redis_service import get_sync_redis, STREAM_SENTIMENT
-    client = get_sync_redis()
-    client.xadd(
-        STREAM_SENTIMENT,
-        {"data": event.model_dump_json()},
-        maxlen=10_000,
-        approximate=True,
-    )
+# (Removed inline _publish_sentiment_sync, importing from redis_service now)
 
 
 # ── Finnhub News Feed ─────────────────────────────────────────────────────────
@@ -108,8 +99,12 @@ async def run_finnhub_news() -> None:
 
     while True:
         try:
+            from datetime import datetime, timedelta
+            from_date = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+            to_date = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+            
             for sym in SYMBOLS_TO_POLL:
-                news_items = client.company_news(sym, _from="2024-01-01", to="2099-01-01")
+                news_items = client.company_news(sym, _from=from_date, to=to_date)
                 for item in news_items[:5]:  # latest 5 per symbol
                     news_id = str(item.get("id", ""))
                     if news_id in seen_ids:
@@ -128,7 +123,7 @@ async def run_finnhub_news() -> None:
                         sentiment_score=score,
                         headline=headline[:500],
                     )
-                    _publish_sentiment_sync(event)
+                    publish_sentiment_sync(event)
                     logger.debug("Published Finnhub news for %s (score=%.2f)", sym, score)
 
         except Exception as exc:  # noqa: BLE001
@@ -177,7 +172,7 @@ async def run_reddit_feed() -> None:
                 sentiment_score=score,
                 headline=title[:500],
             )
-            _publish_sentiment_sync(event)
+            publish_sentiment_sync(event)
             logger.debug("Published Reddit sentiment for %s (score=%.2f)", symbol, score)
 
     # Run PRAW in a thread pool so it doesn't block the asyncio loop.

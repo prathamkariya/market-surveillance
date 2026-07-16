@@ -59,6 +59,9 @@ INDIA_SYMBOLS_YF: list[str] = [
 
 RECONNECT_MAX_BACKOFF_S = 60
 
+# Track primary feed health (grace period at boot to avoid flooding)
+last_seen_primary: float = time.time()
+
 
 # ── Upstox Primary Feed ───────────────────────────────────────────────────────
 async def run_upstox_feed() -> None:
@@ -130,6 +133,10 @@ async def run_upstox_feed() -> None:
                                 notional_value=round(price * float(ltpc.get("vol", 0)), 2),
                                 is_buyer_maker=None,
                             )
+                            
+                            global last_seen_primary
+                            last_seen_primary = time.time()
+                            
                             entry_id = publish_trade_sync(event)
                             logger.debug("Published UPSTOX tick %s → Redis %s", event.symbol, entry_id)
 
@@ -146,7 +153,8 @@ async def run_upstox_feed() -> None:
 async def run_yfinance_fallback(poll_interval_s: int = 30) -> None:
     """Poll yfinance every `poll_interval_s` seconds as a fallback.
 
-    Primarily useful outside NSE market hours or when Upstox token expires.
+    Note: This is a workaround for the lack of an Upstox OAuth refresh flow.
+    It provides 30-second polling rather than real streaming when the token expires.
     """
     try:
         import yfinance as yf  # type: ignore
@@ -167,26 +175,35 @@ async def run_yfinance_fallback(poll_interval_s: int = 30) -> None:
 
             if not tickers.empty:
                 for sym in INDIA_SYMBOLS_YF:
-                    try:
-                        latest = tickers["Close"][sym].dropna().iloc[-1]
-                        vol = tickers["Volume"][sym].dropna().iloc[-1]
-                        ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                        try:
+                            # 2.2: Stale data filtering
+                            latest_idx = tickers["Close"][sym].dropna().index[-1]
+                            latest_ts_s = latest_idx.timestamp()
+                            if time.time() - latest_ts_s > 300: # 5 minutes stale
+                                continue
+                                
+                            latest = tickers["Close"][sym].dropna().iloc[-1]
+                            vol = tickers["Volume"][sym].dropna().iloc[-1]
+                            ts_ms = int(latest_ts_s * 1000)
 
-                        event = UnifiedTradeEvent(
-                            event_id=UnifiedTradeEvent.build_event_id("YFINANCE", sym, ts_ms),
-                            timestamp_ms=ts_ms,
-                            market=Market.INDIA_EQUITY,
-                            symbol=sym,
-                            source="YFINANCE",
-                            price=float(latest),
-                            volume=float(vol),
-                            notional_value=round(float(latest) * float(vol), 2),
-                            is_buyer_maker=None,
-                        )
-                        entry_id = publish_trade_sync(event)
-                        logger.debug("Published YFINANCE %s → Redis %s", sym, entry_id)
-                    except Exception as sym_exc:  # noqa: BLE001
-                        logger.warning("yfinance error for %s: %s", sym, sym_exc)
+                            event = UnifiedTradeEvent(
+                                event_id=UnifiedTradeEvent.build_event_id("YFINANCE", sym, ts_ms),
+                                timestamp_ms=ts_ms,
+                                market=Market.INDIA_EQUITY,
+                                symbol=sym,
+                                source="YFINANCE",
+                                price=float(latest),
+                                volume=float(vol),
+                                notional_value=round(float(latest) * float(vol), 2),
+                                is_buyer_maker=None,
+                            )
+                            
+                            # 1.4: Only publish if primary feed is dead
+                            if time.time() - last_seen_primary > 30:
+                                entry_id = publish_trade_sync(event)
+                                logger.debug("Published YFINANCE %s → Redis %s", sym, entry_id)
+                        except Exception as sym_exc:  # noqa: BLE001
+                            logger.warning("yfinance error for %s: %s", sym, sym_exc)
 
         except Exception as exc:  # noqa: BLE001
             logger.error("yfinance polling error: %s", exc)

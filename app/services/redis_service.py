@@ -105,39 +105,61 @@ async def publish_sentiment(event: UnifiedSentimentEvent) -> str:
         maxlen=10_000,
         approximate=True,
     )
+    await client.hset("latest_sentiment", event.symbol, event.sentiment_score)
+    return entry_id
+
+def publish_sentiment_sync(event: UnifiedSentimentEvent) -> str:
+    """Sync: Publish a sentiment event and update the latest HSET."""
+    client = get_sync_redis()
+    payload = event.model_dump_json()
+    entry_id: str = client.xadd(
+        STREAM_SENTIMENT,
+        {"data": payload},
+        maxlen=10_000,
+        approximate=True,
+    )
+    client.hset("latest_sentiment", event.symbol, event.sentiment_score)
     return entry_id
 
 
-# ── Consumer helper ───────────────────────────────────────────────────────────
+async def setup_consumer_group(group_name: str = "engine_group") -> None:
+    """Initialize the Redis consumer group for reliable processing."""
+    client = get_async_redis()
+    try:
+        await client.xgroup_create(STREAM_TRADES, group_name, mkstream=True)
+        logger.info(f"Consumer group '{group_name}' created on '{STREAM_TRADES}'.")
+    except redis.exceptions.ResponseError as e:
+        if "BUSYGROUP" in str(e):
+            logger.debug(f"Consumer group '{group_name}' already exists.")
+        else:
+            raise
+
 async def read_trades_blocking(
-    last_id: str = "$",
+    group_name: str = "engine_group",
+    consumer_name: str = "engine_1",
     count: int = 100,
     block_ms: int = 1000,
-) -> list[dict]:
-    """Block until up to `count` new entries arrive in the live_trades stream.
-
-    Args:
-        last_id  — The last Redis Stream ID seen.  Use "$" for newest-only
-                   (default on first call) or "0" to replay from the start.
-        count    — Max entries to return per call.
-        block_ms — Milliseconds to block waiting for new data.
+) -> list[tuple[str, dict]]:
+    """Block until up to `count` new entries arrive in the live_trades stream via XREADGROUP.
 
     Returns:
-        List of raw event dicts (already JSON-parsed from the "data" field).
+        List of tuples (entry_id, event_dict).
     """
     client = get_async_redis()
-    results = await client.xread(
-        {STREAM_TRADES: last_id},
+    results = await client.xreadgroup(
+        group_name,
+        consumer_name,
+        {STREAM_TRADES: ">"},
         count=count,
         block=block_ms,
     )
-    events: list[dict] = []
+    events: list[tuple[str, dict]] = []
     if results:
         # results = [(stream_name, [(entry_id, {field: value}), ...])]
         for _stream, entries in results:
-            for _entry_id, fields in entries:
+            for entry_id, fields in entries:
                 try:
-                    events.append(json.loads(fields["data"]))
+                    events.append((entry_id, json.loads(fields["data"])))
                 except (KeyError, json.JSONDecodeError) as exc:
                     logger.warning("Malformed Redis entry: %s — %s", fields, exc)
     return events

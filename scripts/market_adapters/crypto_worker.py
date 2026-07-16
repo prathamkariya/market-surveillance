@@ -53,6 +53,9 @@ SYMBOLS: list[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "DOGEUSDT"]
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/spot"
 RECONNECT_MAX_BACKOFF_S = 60  # Max seconds between reconnect attempts
 
+# Track primary feed health (grace period at boot to avoid flooding)
+last_seen_primary: float = time.time()
+
 
 # ── Normalise Binance trade → UnifiedTradeEvent ───────────────────────────────
 def _normalise_binance(raw: dict) -> Optional[UnifiedTradeEvent]:
@@ -130,6 +133,8 @@ async def run_binance_feed() -> None:
                     raw = msg.get("data", msg)
                     event = _normalise_binance(raw)
                     if event:
+                        global last_seen_primary
+                        last_seen_primary = time.time()
                         entry_id = publish_trade_sync(event)
                         logger.debug("Published BINANCE tick %s → Redis %s", event.symbol, entry_id)
 
@@ -163,8 +168,9 @@ async def run_bybit_feed() -> None:
                     raw = json.loads(raw_msg)
                     event = _normalise_bybit(raw)
                     if event:
-                        entry_id = publish_trade_sync(event)
-                        logger.debug("Published BYBIT tick %s → Redis %s", event.symbol, entry_id)
+                        if time.time() - last_seen_primary > 30:
+                            entry_id = publish_trade_sync(event)
+                            logger.debug("Published BYBIT tick %s → Redis %s (Fallback Active)", event.symbol, entry_id)
 
         except Exception as exc:  # noqa: BLE001
             logger.error("Bybit feed error: %s. Reconnecting in %ds …", exc, backoff)
