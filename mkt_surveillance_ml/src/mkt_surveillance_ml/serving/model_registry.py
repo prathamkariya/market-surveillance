@@ -14,6 +14,7 @@ class ModelRegistry:
         self.isolation_forest_metadata = {}
         self.multi_pattern_detector = None
         self.multi_pattern_metadata = {}
+        self.symbol_baselines: dict = {}
 
     def load(self):
         if not self.model_dir.exists():
@@ -50,8 +51,25 @@ class ModelRegistry:
             except Exception as e:
                 errors.append(f"Failed to load Multi Pattern Detector: {e}")
 
+        # Try to load symbol baselines (required when IsolationForest is z-score trained)
+        baselines_path = self.model_dir / "symbol_baselines.json"
+        if baselines_path.exists():
+            try:
+                with open(baselines_path, "r") as f:
+                    self.symbol_baselines = json.load(f)
+            except Exception as e:
+                errors.append(f"Failed to load symbol baselines: {e}")
+
         if errors:
             raise ModelLoadError("; ".join(errors))
+
+    def get_baseline(self, symbol: str) -> Optional[dict]:
+        """Return the per-symbol baseline stats dict or None if unknown.
+
+        Returns None (not KeyError) for unrecognised symbols so callers can
+        implement the 'baseline_unavailable' sentinel without a try/except.
+        """
+        return self.symbol_baselines.get(symbol)
 
     @property
     def has_isolation_forest(self) -> bool:
@@ -64,3 +82,4 @@ class ModelRegistry:
     @property
     def has_any_model(self) -> bool:
         return self.has_isolation_forest or self.has_multi_pattern
+

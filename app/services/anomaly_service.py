@@ -160,6 +160,56 @@ def _market_data_to_feature_row(record: MarketData, historical: list[MarketData]
     return {col: float(last_row[col]) for col in BASE_FEATURE_COLUMNS}
 
 
+def _apply_zscores(features: dict, symbol: str, registry: ModelRegistry) -> Optional[dict]:
+    """Applies per-symbol rolling z-score transformation to return and
+    volatility_20d features using baselines from the model registry.
+    Returns None if the symbol has no baseline.
+    """
+    baseline = registry.get_baseline(symbol)
+    if not baseline:
+        return None
+
+    norm_features = features.copy()
+    for col in ["return", "volatility_20d"]:
+        stats = baseline.get(col)
+        if stats and stats.get("mean") is not None and stats.get("std") is not None:
+            mean = stats["mean"]
+            std = stats["std"]
+            norm_features[col] = (features[col] - mean) / std
+    return norm_features
+
+
+def _make_unavailable_sentinel(
+    trade: dict,
+    market: str,
+    source: str,
+    is_low_confidence: bool,
+    sentiment_score: float,
+    confidence: str,
+    features: Optional[dict] = None,
+) -> dict:
+    """Standardized dictionary shape returned by score_live_trade when
+    models or baselines are unavailable. Ensures all expected keys are present.
+    """
+    return {
+        "event_id": trade["event_id"],
+        "symbol": trade["symbol"],
+        "timestamp_ms": trade["timestamp_ms"],
+        "price": trade["price"],
+        "volume": trade["volume"],
+        "market": market,
+        "source": source,
+        "anomaly_score": None,
+        "low_confidence": is_low_confidence,
+        "sentiment_score": sentiment_score,
+        "confidence": confidence,
+        "isolation_forest_score": None,
+        "multi_pattern_max_score": None,
+        "pattern_scores": None,
+        "features": features,
+    }
+
+
 # ──────────────────────────────────────────────
 # Scoring — real trained models
 # ──────────────────────────────────────────────
@@ -235,7 +285,7 @@ def detect_anomaly(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"MarketData record {record.id} has no 'market' classification. "
+                f"Market classification missing on record {record.id}. "
                 "Legacy records must be updated or re-submitted before anomaly detection."
             )
         )
@@ -250,6 +300,17 @@ def detect_anomaly(
                 "at the output directory."
             ),
         )
+
+    # Apply per-symbol z-score transformation if model was trained with z-scores
+    baselines = getattr(registry, "symbol_baselines", {})
+    if baselines:
+        norm_features = _apply_zscores(features, record.symbol, registry)
+        if norm_features is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Baseline not found for symbol '{record.symbol}'. Please retrain the model to include this symbol.",
+            )
+        features = norm_features
 
     isolation_forest_score = None
     multi_pattern_max_score = None
@@ -357,19 +418,34 @@ def score_live_trade(
         # Phase 7. Return a sentinel so callers know coverage is missing rather
         # than silently producing zero alerts.
         if is_low_confidence or market == "INDIA_EQUITY":
-            return {
-                "event_id": trade["event_id"],
-                "symbol": trade["symbol"],
-                "timestamp_ms": trade["timestamp_ms"],
-                "price": trade["price"],
-                "volume": trade["volume"],
-                "market": market,
-                "source": source,
-                "anomaly_score": None,
-                "confidence": "model_unavailable",
-                "sentiment_score": sentiment_score,
-            }
+            return _make_unavailable_sentinel(
+                trade=trade,
+                market=market,
+                source=source,
+                is_low_confidence=is_low_confidence,
+                sentiment_score=sentiment_score,
+                confidence="model_unavailable",
+                features=features,
+            )
         return None
+
+    # Apply per-symbol z-score transformation if model was trained with z-scores
+    baselines = getattr(registry, "symbol_baselines", {})
+    if baselines:
+        norm_features = _apply_zscores(features, trade["symbol"], registry)
+        if norm_features is None:
+            if is_low_confidence or market == "INDIA_EQUITY":
+                return _make_unavailable_sentinel(
+                    trade=trade,
+                    market=market,
+                    source=source,
+                    is_low_confidence=is_low_confidence,
+                    sentiment_score=sentiment_score,
+                    confidence="baseline_unavailable",
+                    features=features,
+                )
+            return None
+        features = norm_features
 
     isolation_forest_score = None
     multi_pattern_max_score = None

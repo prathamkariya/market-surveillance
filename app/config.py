@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
     _DEFAULT_SECRET = "change-this-in-production-use-openssl-rand-hex-32"
 

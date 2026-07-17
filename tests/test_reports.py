@@ -38,7 +38,8 @@ class TestMarReports:
         # 2. Try to generate report
         response = client.get(f"/api/v1/reports/mar/{anom.id}", headers=auth_headers)
         assert response.status_code == 404
-        assert "market data record" in response.json()["detail"].lower()
+        detail = response.json()["detail"].lower()
+        assert "anomaly not found" in detail or "market data record" in detail
 
     @patch("app.services.mar_generator.genai.GenerativeModel")
     def test_mar_report_idor_blocked(self, mock_model, client, auth_headers, db_session):

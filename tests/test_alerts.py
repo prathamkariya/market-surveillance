@@ -311,9 +311,51 @@ class TestSSELiveAlerts:
         with client.stream("GET", f"/api/v1/alerts/stream/live?token={sse_token}") as response:
             assert response.status_code == 200
 
-    def test_stream_live_alerts_filters_by_watchlist(self, client, auth_headers):
-        # This is a unit test that would need a mocked Redis stream to assert filtering logic,
-        # but the request is to ensure the auth/filtering structure exists. 
-        # A more robust integration test would publish to stream and read back,
-        # but verifying the endpoint structure and token auth works is the key for B1/B2.
-        pass
+    @patch("app.services.redis_service.get_async_redis")
+    def test_stream_live_alerts_filters_by_watchlist(self, mock_get_redis, client, auth_headers):
+        import asyncio
+        import json
+
+        # Mock Redis to yield a batch of alerts, then cancel the stream
+        class MockRedis:
+            def __init__(self):
+                self.called = False
+
+            async def xread(self, *args, **kwargs):
+                if not self.called:
+                    self.called = True
+                    # Return 3 anomalies, only one is AAPL
+                    payloads = [
+                        ("1-0", {"data": json.dumps({"symbol": "TSLA", "anomaly_score": 0.9})}),
+                        ("2-0", {"data": json.dumps({"symbol": "AAPL", "anomaly_score": 0.95})}),
+                        ("3-0", {"data": json.dumps({"symbol": "MSFT", "anomaly_score": 0.8})}),
+                    ]
+                    return [("stream_alerts", payloads)]
+                else:
+                    await asyncio.sleep(0.1)
+                    raise asyncio.CancelledError()
+
+        mock_get_redis.return_value = MockRedis()
+
+        # 1. Create a watchlist and add "AAPL"
+        wl_resp = client.post("/api/v1/watchlists", json={"name": "Tech"}, headers=auth_headers)
+        assert wl_resp.status_code == 201
+        wl_id = wl_resp.json()["id"]
+        client.post(f"/api/v1/watchlists/{wl_id}/symbols", json={"symbol": "AAPL"}, headers=auth_headers)
+
+        # 2. Get valid SSE token
+        token_resp = client.post("/api/v1/auth/sse-token", headers=auth_headers)
+        sse_token = token_resp.json()["sse_token"]
+
+        # 3. Read stream and verify only AAPL is emitted
+        received_data = []
+        with client.stream("GET", f"/api/v1/alerts/stream/live?token={sse_token}") as response:
+            assert response.status_code == 200
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    payload_str = line[len("data: "):]
+                    received_data.append(json.loads(payload_str))
+
+        # 4. Assert filtering logic (B2)
+        assert len(received_data) == 1
+        assert received_data[0]["symbol"] == "AAPL"
