@@ -229,8 +229,16 @@ def detect_anomaly(
     # 3. Feature engineering (raises 400 if insufficient history)
     features = _market_data_to_feature_row(record, historical)
 
-    # 4. Score with whichever real models are available
-    registry = get_model_registry()
+    # 4. Route to the correct per-market model registry.
+    market = record.market
+    if market is None:
+        # Fallback for legacy records that predate the market column
+        if any(suffix in record.symbol.upper() for suffix in ["USDT", "BTC", "ETH", "-", "/"]):
+            market = "CRYPTO"
+        else:
+            market = "US_EQUITY"
+            
+    registry = get_model_registry(market=market)
     if not registry.has_any_model:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

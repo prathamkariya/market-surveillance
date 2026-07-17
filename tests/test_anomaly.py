@@ -232,3 +232,37 @@ class TestDetectAnomaly:
         assert abs(body["anomaly_score"] - expected) < 1e-4, (
             f"Expected weighted score {expected}, got {body['anomaly_score']}"
         )
+
+    def test_detect_anomaly_routes_to_correct_market(self, client, auth_headers, sample_market_data_with_history):
+        # sample_market_data_with_history created 30 records with market='US_EQUITY'.
+        record_id = sample_market_data_with_history["id"]
+        
+        # This will trigger the anomaly check, and it succeeds with 201.
+        resp2 = client.post(
+            "/api/v1/anomalies",
+            json={"market_data_id": record_id},
+            headers=auth_headers
+        )
+        assert resp2.status_code == 201
+        assert "anomaly_score" in resp2.json()
+
+    def test_detect_anomaly_null_market_returns_400(self, client, auth_headers, db_session, sample_market_data_with_history):
+        # We simulate legacy data without a market by dropping it down to the DB directly.
+        from app.models import MarketData
+        
+        db = db_session
+        
+        # Take the last record (which has enough history preceding it) and set market=None
+        legacy_id = sample_market_data_with_history["id"]
+        legacy_md = db.query(MarketData).filter(MarketData.id == legacy_id).first()
+        legacy_md.market = None
+        db.commit()
+        
+        # Trigger anomaly endpoint on legacy record -> should return 400
+        resp = client.post(
+            "/api/v1/anomalies",
+            json={"market_data_id": legacy_id},
+            headers=auth_headers
+        )
+        assert resp.status_code == 400
+        assert "Market classification missing" in resp.json()["detail"]

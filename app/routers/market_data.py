@@ -32,6 +32,13 @@ def create_market_data(
     per-user, the real fix is scoping the constraint to
     (user_id, symbol, timestamp) instead.
     """
+    def infer_market(symbol: str) -> str:
+        # Crypto: typically ends in USDT, BTC, ETH, or contains a hyphen/slash
+        if any(suffix in symbol.upper() for suffix in ["USDT", "BTC", "ETH", "-", "/"]):
+            return "CRYPTO"
+        # Fallback/Equities: shorter alpha symbols
+        return "US_EQUITY"
+
     record = MarketData(
         user_id=current_user.id,
         symbol=payload.symbol,
@@ -41,6 +48,7 @@ def create_market_data(
         low=payload.low,
         close=payload.close,
         volume=payload.volume,
+        market=infer_market(payload.symbol),
     )
     db.add(record)
     try:

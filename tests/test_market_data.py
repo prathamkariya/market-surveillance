@@ -14,6 +14,7 @@ VALID_PAYLOAD = {
     "low": 185.10,
     "close": 185.90,
     "volume": 1250000.0,
+    "market": "US_EQUITY"
 }
 
 
@@ -148,7 +149,7 @@ class TestGetMarketData:
         record_id = sample_market_data["id"]
         response = client.get(f"/api/v1/market-data/{record_id}", headers=auth_headers)
         assert response.json()["id"] == record_id
-        assert response.json()["symbol"] == "AAPL"
+        assert response.json()["symbol"] == "BTCUSD"
 
     def test_get_nonexistent_returns_404(self, client, auth_headers):
         response = client.get("/api/v1/market-data/999999", headers=auth_headers)

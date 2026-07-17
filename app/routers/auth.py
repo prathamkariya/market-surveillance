@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -141,3 +143,25 @@ def logout_all(
 def get_me(current_user: User = Depends(get_current_user)):
     """Return the currently authenticated user's profile."""
     return current_user
+
+
+@router.post("/sse-token", tags=["auth"])
+def get_sse_token(current_user: User = Depends(get_current_user)):
+    """Issue a short-lived (60s), purpose-scoped token for the SSE stream endpoint.
+
+    The browser EventSource API cannot send custom headers, so the SSE endpoint
+    accepts the token via a ?token= query param. Using a separate, very-short-lived
+    token (rather than reusing the 30-minute access token) limits the exposure
+    window if the URL is logged by a proxy or lands in browser history.
+
+    The returned token is only valid for GET /alerts/stream/live and expires in 60s.
+    """
+    from jose import jwt as jose_jwt
+    expire = datetime.utcnow() + timedelta(seconds=60)
+    payload = {
+        "sub": str(current_user.id),
+        "type": "sse",
+        "exp": expire,
+    }
+    token = jose_jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return {"sse_token": token, "expires_in": 60}

@@ -34,6 +34,7 @@ REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # consumer always refer to the same key.
 STREAM_TRADES: str = "live_trades"
 STREAM_SENTIMENT: str = "live_sentiment"
+STREAM_ALERTS: str = "live_alerts"
 
 # Maximum entries to keep in each stream before Redis auto-trims.
 # At ~5 000 ticks/sec (Binance burst), 50 000 entries ≈ 10 s of data in RAM.

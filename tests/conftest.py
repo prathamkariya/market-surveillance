@@ -208,13 +208,14 @@ def sample_market_data(client, auth_headers) -> dict:
     exercise.
     """
     payload = {
-        "symbol": "AAPL",
-        "timestamp": "2024-01-15T10:00:00Z",
-        "open": 185.50,
-        "high": 186.20,
-        "low": 185.10,
-        "close": 185.90,
-        "volume": 1250000.0,
+        "symbol": "BTCUSD",
+        "timestamp": "2023-01-01T12:00:00Z",
+        "open": 16500.50,
+        "high": 16600.00,
+        "low": 16400.00,
+        "close": 16550.25,
+        "volume": 12.5,
+        "market": "CRYPTO"
     }
     response = client.post("/api/v1/market-data", json=payload, headers=auth_headers)
     assert response.status_code == 201, f"Market data creation failed: {response.text}"
@@ -295,6 +296,7 @@ def sample_market_data_with_history(client, auth_headers) -> dict:
             "low": float(close[i]) - 0.8,
             "close": float(close[i]),
             "volume": float(volume[i]),
+            "market": "US_EQUITY"
         }
         response = client.post("/api/v1/market-data", json=payload, headers=auth_headers)
         assert response.status_code == 201, f"Market data creation failed: {response.text}"

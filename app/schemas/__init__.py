@@ -101,6 +101,7 @@ class MarketDataResponse(OrmBase):
     low: float
     close: float
     volume: float
+    market: Optional[str]
     created_at: datetime
 
 

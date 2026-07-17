@@ -17,11 +17,16 @@ from app.models import Anomaly, MarketData
 logger = logging.getLogger(__name__)
 
 
-def generate_mar(db: Session, alert_id: int) -> str:
+def generate_mar(db: Session, alert_id: int, user_id: int) -> str:
     """
-    Fetch the alert context, and ask Gemini 1.5 Flash to generate a 
+    Fetch the alert context, and ask Gemini 1.5 Flash to generate a
     suspicious activity report.
     Returns Markdown text.
+
+    Args:
+        db:       SQLAlchemy session.
+        alert_id: Anomaly.id to report on.
+        user_id:  Calling user's ID — used to enforce ownership (B4).
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -29,13 +34,30 @@ def generate_mar(db: Session, alert_id: int) -> str:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="GEMINI_API_KEY not configured in .env",
         )
-        
-    # 1. Fetch data
-    anomaly = db.query(Anomaly).filter(Anomaly.id == alert_id).first()
-    if not anomaly:
+
+    # 1. Fetch alert and anomaly
+    from app.models import Alert
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
         
+    anomaly = db.query(Anomaly).filter(Anomaly.id == alert.anomaly_id).first()
+    if not anomaly:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anomaly not found")
+
+    # B4: Ownership check — any logged-in user could previously read any user's report
     md = db.query(MarketData).filter(MarketData.id == anomaly.market_data_id).first()
+    if md is None:
+        # B5: Parent MarketData was deleted — don't crash into md.symbol AttributeError
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Market data record associated with this alert no longer exists.",
+        )
+    if md.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this report.",
+        )
     
     # 2. Prepare Context Prompt
     context = f"""

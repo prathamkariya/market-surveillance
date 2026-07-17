@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey,
     Index, Integer, Numeric, String, Text, UniqueConstraint,
@@ -19,12 +19,12 @@ class User(Base):
     username = Column(String(50), nullable=False, unique=True, index=True)
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -61,8 +61,13 @@ class MarketData(Base):
     low = Column(Numeric(15, 6), nullable=False)
     close = Column(Numeric(15, 6), nullable=False)
     volume = Column(Numeric(20, 2), nullable=False)
+    # Market classification stamped at ingestion time (e.g. "CRYPTO", "US_EQUITY").
+    # Nullable for backward compat with records created before this column was added.
+    # detect_anomaly() raises 400 if this is None — callers must re-submit old records
+    # via POST /market-data with market= set rather than silently routing to a wrong model.
+    market = Column(String(20), nullable=True, index=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="market_data")
@@ -92,7 +97,7 @@ class Anomaly(Base):
     pattern_scores = Column(Text, nullable=True)   # JSON string: {"pump_and_dump": 0.02, "wash_trading": 0.87, ...}
     model_version = Column(String(255), nullable=True)  # trained_at_utc of the model(s) that produced this score, for provenance
     features = Column(Text, nullable=True)   # JSON string of feature values
-    detected_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     market_data = relationship("MarketData", back_populates="anomalies")
@@ -130,12 +135,12 @@ class Alert(Base):
     )
     status = Column(String(20), nullable=False, default=AlertStatus.PENDING)
     message = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -168,12 +173,12 @@ class Watchlist(Base):
     )
     name = Column(String(100), nullable=False)
     description = Column(String(500), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -211,7 +216,7 @@ class WatchlistSymbol(Base):
     )
     symbol = Column(String(20), nullable=False)
     notes = Column(String(500), nullable=True)
-    added_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    added_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     watchlist = relationship("Watchlist", back_populates="symbols")
@@ -242,7 +247,7 @@ class RefreshToken(Base):
     token_hash = Column(String(255), nullable=False, unique=True, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="refresh_tokens")

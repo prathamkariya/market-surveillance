@@ -1,14 +1,17 @@
 """app/routers/alerts.py — Alert management endpoints."""
+import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Alert, Anomaly, User
 from app.schemas import AlertCreate, AlertResponse, AlertUpdate
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
@@ -106,17 +109,53 @@ def delete_alert(
 # Streaming Endpoint (Phase 8)
 # ──────────────────────────────────────────────
 from fastapi.responses import StreamingResponse
+from fastapi import Query
 import asyncio
 import json
 
+
 @router.get("/stream/live")
-async def stream_live_alerts():
+async def stream_live_alerts(
+    token: str = Query(..., description="Short-lived SSE token from POST /auth/sse-token"),
+    db: Session = Depends(get_db),
+):
     """
     Server-Sent Events (SSE) endpoint for live anomalies.
-    The frontend UI connects here to receive real-time push notifications 
-    when run_engine.py detects a threat.
+
+    Auth: requires a short-lived SSE token from POST /auth/sse-token
+    (not the regular access token — SSE tokens are URL-safe and expire in 60s).
+
+    Scope: only emits alerts for symbols the user has in any of their watchlists.
+    The engine publishes all market anomalies; this endpoint filters them
+    so each user only sees events relevant to what they're watching.
     """
+    from jose import JWTError, jwt as jose_jwt
+    from app.models import Watchlist, WatchlistSymbol
     from app.services.redis_service import get_async_redis, STREAM_ALERTS
+
+    # B1: Validate SSE-scoped token — reject regular access tokens
+    try:
+        payload = jose_jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_exp": True},
+        )
+        if payload.get("type") != "sse":
+            raise JWTError("wrong token type")
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        from fastapi.responses import Response
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    # B2: Load the user's watchlist symbols once before the stream loop
+    watchlist_symbols: set[str] = {
+        row.symbol
+        for row in db.query(WatchlistSymbol.symbol)
+        .join(Watchlist, WatchlistSymbol.watchlist_id == Watchlist.id)
+        .filter(Watchlist.user_id == user_id)
+        .all()
+    }
 
     async def event_generator():
         client = get_async_redis()
@@ -128,11 +167,15 @@ async def stream_live_alerts():
                     for _stream_name, entries in results:
                         for entry_id, fields in entries:
                             last_id = entry_id
-                            yield f"data: {fields['data']}\n\n"
+                            data = json.loads(fields["data"])
+                            # B2: Only emit if the symbol is in this user's watchlists
+                            if data.get("symbol") in watchlist_symbols:
+                                yield f"data: {fields['data']}\n\n"
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                # Silently wait on Redis failure, don't break the SSE connection
+                # B3: Log Redis failures instead of swallowing them silently
+                logger.error("SSE Redis read error for user_id=%s: %s", user_id, e)
                 await asyncio.sleep(2)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
