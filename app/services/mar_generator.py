@@ -35,13 +35,8 @@ def generate_mar(db: Session, alert_id: int, user_id: int) -> str:
             detail="GEMINI_API_KEY not configured in .env",
         )
 
-    # 1. Fetch alert and anomaly
-    from app.models import Alert
-    alert = db.query(Alert).filter(Alert.id == alert_id).first()
-    if not alert:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
-        
-    anomaly = db.query(Anomaly).filter(Anomaly.id == alert.anomaly_id).first()
+    # 1. Fetch anomaly
+    anomaly = db.query(Anomaly).filter(Anomaly.id == alert_id).first()
     if not anomaly:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anomaly not found")
 

@@ -232,11 +232,13 @@ def detect_anomaly(
     # 4. Route to the correct per-market model registry.
     market = record.market
     if market is None:
-        # Fallback for legacy records that predate the market column
-        if any(suffix in record.symbol.upper() for suffix in ["USDT", "BTC", "ETH", "-", "/"]):
-            market = "CRYPTO"
-        else:
-            market = "US_EQUITY"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"MarketData record {record.id} has no 'market' classification. "
+                "Legacy records must be updated or re-submitted before anomaly detection."
+            )
+        )
             
     registry = get_model_registry(market=market)
     if not registry.has_any_model:

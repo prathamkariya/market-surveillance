@@ -157,7 +157,8 @@ def get_sse_token(current_user: User = Depends(get_current_user)):
     The returned token is only valid for GET /alerts/stream/live and expires in 60s.
     """
     from jose import jwt as jose_jwt
-    expire = datetime.utcnow() + timedelta(seconds=60)
+    from datetime import timezone
+    expire = datetime.now(timezone.utc) + timedelta(seconds=60)
     payload = {
         "sub": str(current_user.id),
         "type": "sse",

@@ -128,6 +128,10 @@ async def stream_live_alerts(
     Scope: only emits alerts for symbols the user has in any of their watchlists.
     The engine publishes all market anomalies; this endpoint filters them
     so each user only sees events relevant to what they're watching.
+    
+    Limitation: Watchlist symbols are cached at connection time. If a user adds
+    or removes a symbol from their watchlist while connected, they will not see
+    the change until they disconnect and reconnect.
     """
     from jose import JWTError, jwt as jose_jwt
     from app.models import Watchlist, WatchlistSymbol
