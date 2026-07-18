@@ -81,6 +81,7 @@ def test_score_live_trade_volume_is_preserved(monkeypatch):
         "timestamp_ms": 1_718_000_000_000,
         "price": 60_000.0,
         "volume": 2.5,          # ← the value we're asserting survives
+        "source": "BINANCE",    # Needed for low_confidence=False
     }
 
     alert = svc.score_live_trade(
