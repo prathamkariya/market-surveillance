@@ -48,7 +48,8 @@ class _MockRegistryTrue:
     has_isolation_forest = True
     has_multi_pattern = False
     isolation_forest = _MockIsolationForest()
-    isolation_forest_metadata = {"trained_at_utc": "mocked_date"}
+    isolation_forest_metadata = {"trained_at_utc": "2024-01-01T00:00:00+00:00"}
+    multi_pattern_metadata = {}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
