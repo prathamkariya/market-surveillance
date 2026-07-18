@@ -535,4 +535,5 @@ def score_live_trade(
         "multi_pattern_max_score": multi_pattern_max_score,
         "pattern_scores": pattern_scores,
         "features": raw_features,
+        "model_version": getattr(registry, "model_version", "v1.0"),
     }

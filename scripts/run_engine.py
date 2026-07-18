@@ -181,6 +181,7 @@ def _get_or_create_system_user(db) -> User:
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         user = User(
             email=SYSTEM_EMAIL,
+            username="system_surveillance",
             hashed_password=pwd_context.hash("system_password_not_used"),
             is_active=True
         )
@@ -213,6 +214,7 @@ def persist_alert_to_db(alert: dict) -> None:
             low=alert["price"],
             close=alert["price"],
             volume=alert["volume"],
+            market=alert.get("market"),
         )
         db.add(md)
         db.commit()
@@ -226,6 +228,7 @@ def persist_alert_to_db(alert: dict) -> None:
             multi_pattern_max_score=alert.get("multi_pattern_max_score"),
             pattern_scores=json.dumps(alert.get("pattern_scores")),
             features=json.dumps(alert.get("features")),
+            model_version=alert.get("model_version"),
         )
         db.add(anom)
         db.commit()
