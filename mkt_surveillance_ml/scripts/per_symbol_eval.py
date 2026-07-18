@@ -18,12 +18,8 @@ def evaluate_market(market: str, scored_csv: str, input_csv: str):
 
     # scored has no symbol column — join on index (date)
     if 'symbol' not in scored.columns:
-        if 'symbol' not in pooled.columns:
-            print("  ERROR: No 'symbol' column in pooled CSV — skipping (run prepare_real_data.py again)")
-            return
-        # Avoid index alignment issues with non-unique index (e.g. date)
-        # We know scored and pooled have the exact same row order
-        scored['symbol'] = pooled['symbol'].values
+        print("  ERROR: No 'symbol' column in scored CSV — skipping (ensure train_zscored.py preserves the symbol column)")
+        return
 
     scored = scored.dropna(subset=['symbol'])
     market_rate = scored['is_flagged'].mean()
