@@ -25,6 +25,8 @@ from app.database import Base, get_db
 from app.main import app
 from app.config import settings
 import app.services.anomaly_service as anomaly_service
+from app.limiter import limiter
+limiter.enabled = False
 
 
 # ══════════════════════════════════════════════════════════════

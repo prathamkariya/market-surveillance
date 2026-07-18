@@ -43,7 +43,7 @@ class User(Base):
 class MarketData(Base):
     __tablename__ = "market_data"
     __table_args__ = (
-        UniqueConstraint("symbol", "timestamp", name="uq_market_data_symbol_timestamp"),
+        UniqueConstraint("user_id", "symbol", "timestamp", name="uq_market_data_user_symbol_timestamp"),
         Index("ix_market_data_symbol_timestamp", "symbol", "timestamp"),
     )
 

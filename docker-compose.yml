@@ -5,9 +5,9 @@ services:
   db:
     image: timescale/timescaledb:latest-pg15
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: market_surveillance
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Error: POSTGRES_PASSWORD must be explicitly provided in the environment}
+      POSTGRES_DB: ${POSTGRES_DB:-market_surveillance}
     ports:
       - "5432:5432"          # Standard port for local tooling
     volumes:
@@ -34,7 +34,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/market_surveillance
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Error: POSTGRES_PASSWORD must be explicitly provided in the environment}
+      - POSTGRES_DB=${POSTGRES_DB:-market_surveillance}
+      - POSTGRES_HOST=db
       - SECRET_KEY=dev_secret_key_change_me
       - MODEL_DIR=/app/trained_models
       - REDIS_URL=redis://redis:6379/0
@@ -45,6 +48,56 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+
+  # ── ML Engine (consumes trades, scores anomalies) ──
+  engine:
+    build: .
+    command: python scripts/run_engine.py
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Error: POSTGRES_PASSWORD must be explicitly provided in the environment}
+      - POSTGRES_DB=${POSTGRES_DB:-market_surveillance}
+      - POSTGRES_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_DIR=/app/trained_models
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  # ── Market Adapters (ingest trades into Redis) ──
+  crypto_worker:
+    build: .
+    command: python scripts/market_adapters/crypto_worker.py
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      # - BINANCE_API_KEY=your_key
+      # - BINANCE_API_SECRET=your_secret
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  us_worker:
+    build: .
+    command: python scripts/market_adapters/us_worker.py
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      # - ALPACA_API_KEY=your_key
+      # - ALPACA_API_SECRET=your_secret
+      # - FINNHUB_API_KEY=your_key
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
 
 volumes:
   postgres_data:

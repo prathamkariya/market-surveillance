@@ -94,7 +94,7 @@ def _normalise_bybit(raw: dict) -> list[UnifiedTradeEvent]:
             price: float = float(trade["p"])
             volume: float = float(trade["v"])
             ts_ms: int = int(trade["T"])
-            is_buyer_maker: bool = trade.get("S") == "Buy"
+            is_buyer_maker: bool = trade.get("S") == "Sell"
 
             events.append(
                 UnifiedTradeEvent(

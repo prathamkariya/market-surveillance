@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from app.limiter import limiter
 
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -30,7 +31,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+def register(request: Request, payload: UserRegister, db: Session = Depends(get_db)):
     """
     Register a new user.
     Returns 409 if email or username already exists.
@@ -62,7 +64,8 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate user and return access + refresh token pair.
     Returns 401 for any invalid credential (deliberately vague message).
@@ -86,7 +89,8 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+def refresh_token(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)):
     """
     Exchange a valid refresh token for a new access token.
     The presented refresh token is rotated (revoked) on use.

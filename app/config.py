@@ -4,8 +4,13 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Database
-    DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/market_surveillance"
+    # Database components
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "password"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: str = "5432"
+    POSTGRES_DB: str = "market_surveillance"
+    DATABASE_URL: str | None = None
 
     # JWT — Access tokens
     SECRET_KEY: str = "change-this-in-production-use-openssl-rand-hex-32"
@@ -57,6 +62,20 @@ class Settings(BaseSettings):
                 "This is only acceptable in APP_ENV=development.",
                 stacklevel=2,
             )
+        return self
+
+    @model_validator(mode="after")
+    def _build_db_url(self) -> "Settings":
+        if not self.DATABASE_URL:
+            from sqlalchemy.engine import URL
+            self.DATABASE_URL = URL.create(
+                drivername="postgresql",
+                username=self.POSTGRES_USER,
+                password=self.POSTGRES_PASSWORD,
+                host=self.POSTGRES_HOST,
+                port=int(self.POSTGRES_PORT),
+                database=self.POSTGRES_DB
+            ).render_as_string(hide_password=False)
         return self
 
 

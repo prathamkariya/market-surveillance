@@ -8,25 +8,20 @@ import json
 import logging
 import os
 
-from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 import google.generativeai as genai
-
-from app.models import Anomaly, MarketData
 
 logger = logging.getLogger(__name__)
 
 
-def generate_mar(db: Session, alert_id: int, user_id: int) -> str:
+def generate_mar(context_data: dict) -> str:
     """
     Fetch the alert context, and ask Gemini 1.5 Flash to generate a
     suspicious activity report.
     Returns Markdown text.
 
     Args:
-        db:       SQLAlchemy session.
-        alert_id: Anomaly.id to report on.
-        user_id:  Calling user's ID — used to enforce ownership (B4).
+        context_data: A dictionary containing the necessary DB properties.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -35,40 +30,21 @@ def generate_mar(db: Session, alert_id: int, user_id: int) -> str:
             detail="GEMINI_API_KEY not configured in .env",
         )
 
-    # 1. Fetch anomaly
-    anomaly = db.query(Anomaly).filter(Anomaly.id == alert_id).first()
-    if not anomaly:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anomaly not found")
-
-    # B4: Ownership check — any logged-in user could previously read any user's report
-    md = db.query(MarketData).filter(MarketData.id == anomaly.market_data_id).first()
-    if md is None:
-        # B5: Parent MarketData was deleted — don't crash into md.symbol AttributeError
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Market data record associated with this alert no longer exists.",
-        )
-    if md.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to access this report.",
-        )
-    
     # 2. Prepare Context Prompt
     context = f"""
     You are an expert financial compliance officer. Please generate a Market Abuse Report (MAR)
-    for the following detected anomaly on {md.symbol} at {md.timestamp}.
+    for the following detected anomaly on {context_data['md_symbol']} at {context_data['md_timestamp']}.
     
-    Alert ID: {anomaly.id}
-    Anomaly Score: {anomaly.anomaly_score} (Threshold: 0.7)
-    Isolation Forest Unsupervised Score: {anomaly.isolation_forest_score}
-    Random Forest Supervised Score: {anomaly.multi_pattern_max_score}
+    Alert ID: {context_data['anomaly_id']}
+    Anomaly Score: {context_data['anomaly_score']} (Threshold: 0.7)
+    Isolation Forest Unsupervised Score: {context_data['anomaly_if']}
+    Random Forest Supervised Score: {context_data['anomaly_rf']}
     
-    Price: {md.close}
-    Volume: {md.volume}
+    Price: {context_data['md_close']}
+    Volume: {context_data['md_volume']}
     
     Features computed at the time of anomaly:
-    {json.dumps(json.loads(anomaly.features), indent=2) if anomaly.features else 'N/A'}
+    {json.dumps(json.loads(context_data['anomaly_features']), indent=2) if context_data.get('anomaly_features') else 'N/A'}
     
     Please structure the report with:
     1. Executive Summary
@@ -84,7 +60,10 @@ def generate_mar(db: Session, alert_id: int, user_id: int) -> str:
         genai.configure(api_key=api_key)
         # Using gemini-1.5-flash for speed
         model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(context)
+        response = model.generate_content(
+            context,
+            request_options={"timeout": 30.0}
+        )
         
         return response.text
     except Exception as e:

@@ -171,7 +171,14 @@ async def run():
                         # 4. Persist first; only publish and ack after durable storage succeeds.
                         anomaly_id = await asyncio.to_thread(persist_alert_to_db, alert)
                         alert["anomaly_id"] = anomaly_id
-                        await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
+                        try:
+                            # Use the incoming trade's entry_id as the alert's stream ID for idempotency
+                            await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000, id=entry_id)
+                        except redis.exceptions.ResponseError as e:
+                            if "is equal or smaller" in str(e):
+                                logger.info("Alert for entry %s already exists in %s, skipping publish", entry_id, STREAM_ALERTS)
+                            else:
+                                raise
 
                 # Acknowledge the processed trade
                 await client.xack(STREAM_TRADES, "engine_group", entry_id)
@@ -220,32 +227,44 @@ def persist_alert_to_db(alert: dict) -> int:
         # Note: We intentionally map point-in-time tick price to all OHLC fields
         # because this is a single tick, not an aggregated candle.
         from datetime import datetime, timezone
-        md = MarketData(
+        alert_timestamp = datetime.fromtimestamp(alert["timestamp_ms"] / 1000.0, tz=timezone.utc)
+        
+        md = db.query(MarketData).filter_by(
             user_id=user.id,
             symbol=alert["symbol"],
-            timestamp=datetime.fromtimestamp(alert["timestamp_ms"] / 1000.0, tz=timezone.utc),
-            open=alert["price"],
-            high=alert["price"],
-            low=alert["price"],
-            close=alert["price"],
-            volume=alert["volume"],
-            market=alert.get("market"),
-        )
-        db.add(md)
-        db.commit()
-        db.refresh(md)
+            timestamp=alert_timestamp
+        ).first()
+
+        if not md:
+            md = MarketData(
+                user_id=user.id,
+                symbol=alert["symbol"],
+                timestamp=alert_timestamp,
+                open=alert["price"],
+                high=alert["price"],
+                low=alert["price"],
+                close=alert["price"],
+                volume=alert["volume"],
+                market=alert.get("market"),
+            )
+            db.add(md)
+            db.flush()
         
-        anom = Anomaly(
-            market_data_id=md.id,
-            anomaly_score=alert["anomaly_score"],
-            is_anomaly=True,
-            isolation_forest_score=alert.get("isolation_forest_score"),
-            multi_pattern_max_score=alert.get("multi_pattern_max_score"),
-            pattern_scores=json.dumps(alert.get("pattern_scores")),
-            features=json.dumps(alert.get("features")),
-            model_version=alert.get("model_version"),
-        )
-        db.add(anom)
+        anom = db.query(Anomaly).filter_by(market_data_id=md.id).first()
+        if not anom:
+            anom = Anomaly(
+                market_data_id=md.id,
+                anomaly_score=alert["anomaly_score"],
+                is_anomaly=True,
+                isolation_forest_score=alert.get("isolation_forest_score"),
+                multi_pattern_max_score=alert.get("multi_pattern_max_score"),
+                pattern_scores=json.dumps(alert.get("pattern_scores")),
+                features=json.dumps(alert.get("features")),
+                model_version=alert.get("model_version"),
+            )
+            db.add(anom)
+            db.flush()
+            
         db.commit()
         db.refresh(anom)
         return anom.id
