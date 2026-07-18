@@ -26,6 +26,7 @@ not an accidental behavior change to paper over.
 """
 import json
 import logging
+import math
 import threading
 from typing import Optional
 
@@ -172,14 +173,24 @@ def _apply_zscores(features: dict, symbol: str, registry: ModelRegistry) -> Opti
     norm_features = features.copy()
     for col in ["return", "volatility_20d"]:
         stats = baseline.get(col)
-        if not (stats and stats.get("mean") is not None and stats.get("std") not in (None, 0)):
+        if isinstance(stats, dict):
+            mean = stats.get("mean")
+            std = stats.get("std")
+        else:
+            mean = std = None
+            
+        valid = (
+            not isinstance(mean, bool) and not isinstance(std, bool)
+            and isinstance(mean, (int, float)) and isinstance(std, (int, float))
+            and math.isfinite(mean) and math.isfinite(std)
+            and std > 0
+        )
+        if not valid:
             logger.error(
-                "Malformed baseline for symbol=%s column=%s: missing or invalid mean/std. Refusing to score with partial normalization.",
+                "Malformed baseline for symbol=%s column=%s: mean/std missing, non-finite, or non-positive std. Refusing to score with partial normalization.",
                 symbol, col,
             )
             return None
-        mean = stats["mean"]
-        std = stats["std"]
         norm_features[col] = (features[col] - mean) / std
     return norm_features
 
@@ -391,9 +402,10 @@ def score_live_trade(
         the UI and any downstream consumers can surface that distinction rather
         than silently treating a polled candle the same as a live WebSocket tick.
     """
-    source: str = trade.get("source", "UNKNOWN")
+    source_raw = trade.get("source")
+    source: str = source_raw.upper() if isinstance(source_raw, str) else "UNKNOWN"
     # Polling fallbacks (YFINANCE) and malformed/missing sources (UNKNOWN) are marked low-confidence
-    is_low_confidence: bool = source.upper() not in {"BINANCE", "BYBIT", "UPSTOX", "ALPACA", "FINNHUB"}
+    is_low_confidence: bool = source not in {"BINANCE", "BYBIT", "UPSTOX", "ALPACA", "FINNHUB"}
 
     # 1. Feature engineering
     all_records = historical_trades + [trade]

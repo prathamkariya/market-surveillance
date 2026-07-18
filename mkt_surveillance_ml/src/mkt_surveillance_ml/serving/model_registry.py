@@ -51,7 +51,7 @@ class ModelRegistry:
             except Exception as e:
                 errors.append(f"Failed to load Multi Pattern Detector: {e}")
 
-        # Try to load symbol baselines (required when IsolationForest is z-score trained)
+        # Try to load symbol baselines (required when IsolationForest is loaded)
         baselines_path = self.model_dir / "symbol_baselines.json"
         if baselines_path.exists():
             try:
@@ -59,6 +59,8 @@ class ModelRegistry:
                     self.symbol_baselines = json.load(f)
             except Exception as e:
                 errors.append(f"Failed to load symbol baselines: {e}")
+        elif self.isolation_forest is not None:
+            errors.append(f"Failed to load symbol baselines: {baselines_path} is missing but required for Isolation Forest.")
 
         if errors:
             raise ModelLoadError("; ".join(errors))

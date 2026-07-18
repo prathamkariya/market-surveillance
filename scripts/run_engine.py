@@ -54,9 +54,10 @@ async def get_latest_sentiment(client, symbol: str) -> float:
     now = time.time()
 
     if val is not None:
-        _last_successful_sentiment[symbol] = now
         try:
-            return float(val)
+            parsed = float(val)
+            _last_successful_sentiment[symbol] = now
+            return parsed
         except ValueError:
             pass
             

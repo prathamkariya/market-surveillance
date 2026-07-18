@@ -55,13 +55,12 @@ def add_rolling_zscores(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     for sym, grp in df.groupby("symbol", sort=False):
-        idx = grp.index
         for col in ["return", "volatility_20d"]:
             rolling = grp[col].rolling(ROLLING_WINDOW, min_periods=MIN_PERIODS)
             # .shift(1): each row sees the window ENDING at the previous row
             mu = rolling.mean().shift(1)
             sigma = rolling.std().shift(1).clip(lower=1e-8)
-            df.loc[idx, col] = (grp[col] - mu) / sigma
+            df.loc[df["symbol"] == sym, col] = ((grp[col] - mu) / sigma).values
     return df
 
 
@@ -92,8 +91,8 @@ def train_market(market: str, input_csv: str, output_dir: str,
     for sym, grp in df.groupby("symbol", sort=False):
         for col in ["return", "volatility_20d"]:
             rolling = grp[col].rolling(ROLLING_WINDOW, min_periods=MIN_PERIODS)
-            mu = rolling.mean().shift(1)
-            sigma = rolling.std().shift(1).clip(lower=1e-8)
+            mu = rolling.mean()
+            sigma = rolling.std().clip(lower=1e-8)
             # Use the last non-NaN values — the trailing baseline at training end
             last_mu = float(mu.dropna().iloc[-1]) if not mu.dropna().empty else None
             last_sigma = float(sigma.dropna().iloc[-1]) if not sigma.dropna().empty else None
@@ -180,13 +179,13 @@ def train_market(market: str, input_csv: str, output_dir: str,
 if __name__ == "__main__":
     train_market(
         "CRYPTO",
-        input_csv="trained_models/CRYPTO/real_if_input.csv",
-        output_dir="trained_models/CRYPTO",
+        input_csv="trained_models/crypto/real_if_input.csv",
+        output_dir="trained_models/crypto",
         random_state=42,
     )
     train_market(
         "US_EQUITY",
-        input_csv="trained_models/US_EQUITY/real_if_input.csv",
-        output_dir="trained_models/US_EQUITY",
+        input_csv="trained_models/us_equity/real_if_input.csv",
+        output_dir="trained_models/us_equity",
         random_state=43,
     )

@@ -21,7 +21,9 @@ def evaluate_market(market: str, scored_csv: str, input_csv: str):
         if 'symbol' not in pooled.columns:
             print("  ERROR: No 'symbol' column in pooled CSV — skipping (run prepare_real_data.py again)")
             return
-        scored = scored.join(pooled[['symbol']], how='left')
+        # Avoid index alignment issues with non-unique index (e.g. date)
+        # We know scored and pooled have the exact same row order
+        scored['symbol'] = pooled['symbol'].values
 
     scored = scored.dropna(subset=['symbol'])
     market_rate = scored['is_flagged'].mean()
@@ -57,7 +59,9 @@ def evaluate_market(market: str, scored_csv: str, input_csv: str):
 
 if __name__ == "__main__":
     for market, scored_csv, input_csv in [
-        ("CRYPTO",    "trained_models/CRYPTO/scored_days.csv",    "trained_models/CRYPTO/real_if_input.csv"),
-        ("US_EQUITY", "trained_models/US_EQUITY/scored_days.csv", "trained_models/US_EQUITY/real_if_input.csv"),
+        ("CRYPTO",    "trained_models/crypto/scored_days.csv",    "trained_models/crypto/real_if_input.csv"),
+        ("US_EQUITY", "trained_models/us_equity/scored_days.csv", "trained_models/us_equity/real_if_input.csv"),
     ]:
-        evaluate_market(market, scored_csv, input_csv)
+        # Handle the lowercase directory naming when saving output
+        mkt_dir = market.lower()
+        evaluate_market(mkt_dir, scored_csv, input_csv)

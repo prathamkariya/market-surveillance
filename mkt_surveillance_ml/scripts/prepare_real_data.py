@@ -24,7 +24,7 @@ def fetch_crypto_data(symbol: str, days: int) -> pd.DataFrame:
         "interval": "1d",
         "limit": days
     }
-    resp = requests.get(url, params=params)
+    resp = requests.get(url, params=params, timeout=(5, 30))
     resp.raise_for_status()
     data = resp.json()
     
@@ -100,7 +100,7 @@ def process_market(market: str, symbols: list[str], fetch_func):
 
 if __name__ == "__main__":
     print("=== Processing CRYPTO ===")
-    process_market("CRYPTO", CRYPTO_SYMBOLS, fetch_crypto_data)
+    process_market("crypto", CRYPTO_SYMBOLS, fetch_crypto_data)
     
     print("=== Processing US_EQUITY ===")
-    process_market("US_EQUITY", US_SYMBOLS, fetch_us_equity_data)
+    process_market("us_equity", US_SYMBOLS, fetch_us_equity_data)
