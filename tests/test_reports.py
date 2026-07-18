@@ -113,3 +113,41 @@ class TestMarReports:
             "if this 404s with 'Alert not found', the endpoint is querying "
             "Alert.id instead of Anomaly.id"
         )
+
+    @patch("app.services.mar_generator.genai.GenerativeModel")
+    def test_mar_report_system_anomaly_is_public(self, mock_model, client, auth_headers, db_session):
+        from app.models import Anomaly, MarketData, User
+
+        mock_instance = MagicMock()
+        mock_instance.generate_content.return_value = MagicMock(text="# Mock MAR Report")
+        mock_model.return_value = mock_instance
+
+        db = db_session
+        
+        # Ensure system user exists
+        system_user = db.query(User).filter(User.email == "system@marketsurveillance.local").first()
+        if not system_user:
+            system_user = User(email="system@marketsurveillance.local", username="system", hashed_password="x")
+            db.add(system_user)
+            db.commit()
+            db.refresh(system_user)
+
+        # Market data owned by system user
+        md = MarketData(
+            user_id=system_user.id, symbol="SYSTEM_ANOM", timestamp="2022-01-01T12:00:00Z",
+            open=10.0, high=10.0, low=10.0, close=10.0, volume=10.0, market="CRYPTO"
+        )
+        db.add(md)
+        db.commit()
+        db.refresh(md)
+
+        anom = Anomaly(market_data_id=md.id, anomaly_score=0.95)
+        db.add(anom)
+        db.commit()
+        db.refresh(anom)
+
+        # auth_headers belongs to "test@example.com", which is not the system user.
+        # Should return 200, not 403, because system anomalies are public.
+        response = client.get(f"/api/v1/reports/mar/{anom.id}", headers=auth_headers)
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+
