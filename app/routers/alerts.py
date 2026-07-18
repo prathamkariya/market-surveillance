@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Alert, Anomaly, User
+from app.models import Alert, Anomaly, MarketData, User
 from app.schemas import AlertCreate, AlertResponse, AlertUpdate
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,15 @@ def create_alert(
     current_user: User = Depends(get_current_user),
 ):
     """Create an alert for an anomaly owned by the current user."""
-    anomaly = db.query(Anomaly).filter(Anomaly.id == payload.anomaly_id).first()
+    anomaly = (
+        db.query(Anomaly)
+        .join(MarketData, Anomaly.market_data_id == MarketData.id)
+        .filter(
+            Anomaly.id == payload.anomaly_id,
+            MarketData.user_id == current_user.id,
+        )
+        .first()
+    )
     if anomaly is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anomaly not found")
 

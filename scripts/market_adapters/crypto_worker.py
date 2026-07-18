@@ -84,31 +84,34 @@ def _normalise_binance(raw: dict) -> Optional[UnifiedTradeEvent]:
 
 
 # ── Normalise Bybit trade → UnifiedTradeEvent ─────────────────────────────────
-def _normalise_bybit(raw: dict) -> Optional[UnifiedTradeEvent]:
+def _normalise_bybit(raw: dict) -> list[UnifiedTradeEvent]:
     """Parse a raw Bybit publicTrade stream payload."""
+    events: list[UnifiedTradeEvent] = []
     try:
         # Bybit: {"topic":"publicTrade.BTCUSDT","data":[{...}]}
+        symbol: str = raw["topic"].split(".")[-1]
         for trade in raw.get("data", []):
-            symbol: str = raw["topic"].split(".")[-1]
             price: float = float(trade["p"])
             volume: float = float(trade["v"])
             ts_ms: int = int(trade["T"])
             is_buyer_maker: bool = trade.get("S") == "Buy"
 
-            return UnifiedTradeEvent(
-                event_id=UnifiedTradeEvent.build_event_id("BYBIT", symbol, ts_ms),
-                timestamp_ms=ts_ms,
-                market=Market.CRYPTO,
-                symbol=symbol,
-                source="BYBIT",
-                price=price,
-                volume=volume,
-                notional_value=round(price * volume, 8),
-                is_buyer_maker=is_buyer_maker,
+            events.append(
+                UnifiedTradeEvent(
+                    event_id=UnifiedTradeEvent.build_event_id("BYBIT", symbol, ts_ms),
+                    timestamp_ms=ts_ms,
+                    market=Market.CRYPTO,
+                    symbol=symbol,
+                    source="BYBIT",
+                    price=price,
+                    volume=volume,
+                    notional_value=round(price * volume, 8),
+                    is_buyer_maker=is_buyer_maker,
+                )
             )
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("Bybit parse error: %s — raw: %s", exc, raw)
-    return None
+    return events
 
 
 # ── Binance Primary Feed ───────────────────────────────────────────────────────
@@ -166,10 +169,11 @@ async def run_bybit_feed() -> None:
                 logger.info("Bybit fallback feed active.")
                 async for raw_msg in ws:
                     raw = json.loads(raw_msg)
-                    event = _normalise_bybit(raw)
-                    if event:
+                    events = _normalise_bybit(raw)
+                    if events:
                         if time.time() - last_seen_primary > 30:
-                            entry_id = publish_trade_sync(event)
+                            for event in events:
+                                entry_id = publish_trade_sync(event)
                             logger.debug("Published BYBIT tick %s → Redis %s (Fallback Active)", event.symbol, entry_id)
 
         except Exception as exc:  # noqa: BLE001

@@ -97,8 +97,9 @@ async def run_alpaca_feed() -> None:
 
 
 # ── Finnhub Fallback Feed ─────────────────────────────────────────────────────
-def _normalise_finnhub(raw: dict) -> Optional[UnifiedTradeEvent]:
+def _normalise_finnhub(raw: dict) -> list[UnifiedTradeEvent]:
     """Parse a Finnhub WebSocket trade payload."""
+    events: list[UnifiedTradeEvent] = []
     try:
         # Finnhub: {"type":"trade","data":[{"p":150.5,"s":"AAPL","t":1718000000000,"v":100}]}
         for trade in raw.get("data", []):
@@ -106,20 +107,22 @@ def _normalise_finnhub(raw: dict) -> Optional[UnifiedTradeEvent]:
             price: float = float(trade["p"])
             volume: float = float(trade["v"])
             ts_ms: int = int(trade["t"])
-            return UnifiedTradeEvent(
-                event_id=UnifiedTradeEvent.build_event_id("FINNHUB", symbol, ts_ms),
-                timestamp_ms=ts_ms,
-                market=Market.US_EQUITY,
-                symbol=symbol,
-                source="FINNHUB",
-                price=price,
-                volume=volume,
-                notional_value=round(price * volume, 6),
-                is_buyer_maker=None,
+            events.append(
+                UnifiedTradeEvent(
+                    event_id=UnifiedTradeEvent.build_event_id("FINNHUB", symbol, ts_ms),
+                    timestamp_ms=ts_ms,
+                    market=Market.US_EQUITY,
+                    symbol=symbol,
+                    source="FINNHUB",
+                    price=price,
+                    volume=volume,
+                    notional_value=round(price * volume, 6),
+                    is_buyer_maker=None,
+                )
             )
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("Finnhub parse error: %s — raw: %s", exc, raw)
-    return None
+    return events
 
 
 async def run_finnhub_feed() -> None:

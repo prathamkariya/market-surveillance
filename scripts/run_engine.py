@@ -20,6 +20,7 @@ import logging
 import os
 import sys
 import time
+from socket import gethostname
 
 # Ensure repo root is on path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -28,6 +29,7 @@ from app.database import SessionLocal
 from app.models import Anomaly, MarketData, User
 from app.services.anomaly_service import score_live_trade
 from app.services.redis_service import (
+    claim_pending_trades,
     get_async_redis,
     setup_consumer_group,
     read_trades_blocking,
@@ -93,11 +95,24 @@ async def run():
     await setup_consumer_group("engine_group")
     
     client = get_async_redis()
+    consumer_name = os.getenv("ENGINE_CONSUMER_NAME", f"engine_{gethostname()}_{os.getpid()}")
     
     logger.info("Engine listening for live trades...")
     while True:
         try:
-            batch = await read_trades_blocking(group_name="engine_group", consumer_name="engine_1", count=50, block_ms=2000)
+            batch = await claim_pending_trades(
+                group_name="engine_group",
+                consumer_name=consumer_name,
+                min_idle_ms=60_000,
+                count=50,
+            )
+            if not batch:
+                batch = await read_trades_blocking(
+                    group_name="engine_group",
+                    consumer_name=consumer_name,
+                    count=50,
+                    block_ms=2000,
+                )
             if not batch:
                 continue
             
@@ -153,10 +168,10 @@ async def run():
                             "🚨 ANOMALY DETECTED: %s score=%.2f%s",
                             trade["symbol"], alert["anomaly_score"], confidence_tag,
                         )
-                        # 4. Publish to alerts stream for the UI
+                        # 4. Persist first; only publish and ack after durable storage succeeds.
+                        anomaly_id = await asyncio.to_thread(persist_alert_to_db, alert)
+                        alert["anomaly_id"] = anomaly_id
                         await client.xadd(STREAM_ALERTS, {"data": json.dumps(alert)}, maxlen=1000)
-                        # 5. Persist to Postgres/TimescaleDB without blocking event loop
-                        await asyncio.to_thread(persist_alert_to_db, alert)
 
                 # Acknowledge the processed trade
                 await client.xack(STREAM_TRADES, "engine_group", entry_id)
@@ -193,13 +208,13 @@ def _get_or_create_system_user(db) -> User:
         db.rollback()
         return db.query(User).filter(User.email == SYSTEM_EMAIL).first()
 
-def persist_alert_to_db(alert: dict) -> None:
+def persist_alert_to_db(alert: dict) -> int:
     """Save the anomaly to TimescaleDB for audit/MAR generation."""
     db = SessionLocal()
     try:
         user = _get_or_create_system_user(db)
         if not user:
-            return
+            raise RuntimeError("Failed to resolve system surveillance user")
             
         # Create a raw MarketData record so Anomaly has a parent.
         # Note: We intentionally map point-in-time tick price to all OHLC fields
@@ -232,9 +247,12 @@ def persist_alert_to_db(alert: dict) -> None:
         )
         db.add(anom)
         db.commit()
+        db.refresh(anom)
+        return anom.id
     except Exception as e:
         logger.error("Failed to persist alert to DB: %s", e)
         db.rollback()
+        raise
     finally:
         db.close()
 

@@ -127,7 +127,7 @@ async def setup_consumer_group(group_name: str = "engine_group") -> None:
     """Initialize the Redis consumer group for reliable processing."""
     client = get_async_redis()
     try:
-        await client.xgroup_create(STREAM_TRADES, group_name, mkstream=True)
+        await client.xgroup_create(STREAM_TRADES, group_name, id="0-0", mkstream=True)
         logger.info(f"Consumer group '{group_name}' created on '{STREAM_TRADES}'.")
     except redis.exceptions.ResponseError as e:
         if "BUSYGROUP" in str(e):
@@ -163,6 +163,36 @@ async def read_trades_blocking(
                     events.append((entry_id, json.loads(fields["data"])))
                 except (KeyError, json.JSONDecodeError) as exc:
                     logger.warning("Malformed Redis entry: %s — %s", fields, exc)
+    return events
+
+
+async def claim_pending_trades(
+    group_name: str = "engine_group",
+    consumer_name: str = "engine_1",
+    min_idle_ms: int = 60_000,
+    count: int = 100,
+) -> list[tuple[str, dict]]:
+    """Claim idle pending trade entries so a restarted worker can finish them."""
+    client = get_async_redis()
+    result = await client.xautoclaim(
+        STREAM_TRADES,
+        group_name,
+        consumer_name,
+        min_idle_time=min_idle_ms,
+        start_id="0-0",
+        count=count,
+    )
+    if len(result) == 3:
+        _next_id, entries, _deleted = result
+    else:
+        _next_id, entries = result
+
+    events: list[tuple[str, dict]] = []
+    for entry_id, fields in entries:
+        try:
+            events.append((entry_id, json.loads(fields["data"])))
+        except (KeyError, json.JSONDecodeError) as exc:
+            logger.warning("Malformed pending Redis entry: %s - %s", fields, exc)
     return events
 
 

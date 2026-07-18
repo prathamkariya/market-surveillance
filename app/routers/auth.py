@@ -7,7 +7,6 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
 from app.schemas import (
-    AccessTokenResponse,
     LogoutRequest,
     RefreshRequest,
     TokenResponse,
@@ -86,7 +85,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/refresh", response_model=AccessTokenResponse)
+@router.post("/refresh", response_model=TokenResponse)
 def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
     """
     Exchange a valid refresh token for a new access token.
@@ -101,13 +100,11 @@ def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    new_access_token, _new_refresh = result
+    new_access_token, new_refresh = result
 
-    # NOTE: We return only the new access token here.
-    # The new refresh token from rotation is stored in DB but not returned
-    # in this simplified implementation. In production, return both.
-    return AccessTokenResponse(
+    return TokenResponse(
         access_token=new_access_token,
+        refresh_token=new_refresh,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
