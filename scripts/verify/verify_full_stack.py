@@ -33,10 +33,10 @@ import app.services.anomaly_service as anomaly_service
 
 # ── Train real models, point MODEL_DIR at them (mirrors conftest.py's
 #    trained_models_for_tests fixture) ──
-from mkt_surveillance_ml.data.synthetic import generate_synthetic_market_data
-from mkt_surveillance_ml.detection.multi_pattern import MultiPatternDetector
-from mkt_surveillance_ml.anomaly.isolation_forest import IsolationForestScratch
-from mkt_surveillance_ml.config import BASE_FEATURE_COLUMNS
+from ml.data.synthetic import generate_synthetic_market_data
+from ml.detection.multi_pattern import MultiPatternDetector
+from ml.anomaly.isolation_forest import IsolationForestScratch
+from ml.config import BASE_FEATURE_COLUMNS
 import joblib, tempfile
 from pathlib import Path
 

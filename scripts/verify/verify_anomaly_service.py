@@ -35,10 +35,10 @@ import app.services.anomaly_service as anomaly_service
 from app.services.auth_service import hash_password
 from app.config import settings as app_settings
 
-from mkt_surveillance_ml.data.synthetic import generate_synthetic_market_data
-from mkt_surveillance_ml.detection.multi_pattern import MultiPatternDetector
-from mkt_surveillance_ml.anomaly.isolation_forest import IsolationForestScratch
-from mkt_surveillance_ml.config import BASE_FEATURE_COLUMNS
+from ml.data.synthetic import generate_synthetic_market_data
+from ml.detection.multi_pattern import MultiPatternDetector
+from ml.anomaly.isolation_forest import IsolationForestScratch
+from ml.config import BASE_FEATURE_COLUMNS
 
 results = {"passed": 0, "failed": 0}
 

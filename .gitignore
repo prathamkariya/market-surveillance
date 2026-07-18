@@ -1,5 +1,8 @@
 # Environment variables (passwords, API keys)
 .env
+.env.*
+!.env.example
+!.env.prod.example
 
 # Python cache
 __pycache__/
@@ -43,3 +46,5 @@ htmlcov/
 
 .agents
 .context/
+.continue
+

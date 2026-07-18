@@ -1,4 +1,4 @@
-# Phase 7 Audit — `mkt_surveillance_ml` + FastAPI backend
+# Phase 7 Audit — `ml` + FastAPI backend
 
 **Verified by actually running things**, not reading and guessing: both packages were installed, a local Postgres was built, real test suites were run, `alembic upgrade head` was executed against real Postgres for the first time, and the migrated schema was diffed against what the models produce. Every number below is an actual run, not an estimate.
 
@@ -6,7 +6,7 @@
 
 ## Bottom Line
 
-"Tests pass" is true but narrower than it sounds. The 302 `mkt_surveillance_ml` tests and 156 backend tests genuinely all pass — confirmed independently. But **the one module Phase 7 actually added to the ML package, `serving/model_registry.py`, had zero tests** (`pytest --cov` reports it as "never imported" across all 302), and it has a real bug. The backend rewrite (`anomaly_service.py`) is good work — but Docker, the one deployment piece that's supposed to be Phase 7's other deliverable, doesn't build at all, and there's a leftover dead file the migration doc says was deleted.
+"Tests pass" is true but narrower than it sounds. The 302 `ml` tests and 156 backend tests genuinely all pass — confirmed independently. But **the one module Phase 7 actually added to the ML package, `serving/model_registry.py`, had zero tests** (`pytest --cov` reports it as "never imported" across all 302), and it has a real bug. The backend rewrite (`anomaly_service.py`) is good work — but Docker, the one deployment piece that's supposed to be Phase 7's other deliverable, doesn't build at all, and there's a leftover dead file the migration doc says was deleted.
 
 14 new tests were written (9 + 5) targeting exactly these gaps. 5 fail out of the box. All 5 were fixed and reverified: **472/472 pass** (311 ML package + 161 backend). Patch package applied, all fixes verified.
 
@@ -36,7 +36,7 @@ Tests written: `TestDockerfileReferencesExistingFiles`, `TestDockerComposeEnvVar
 
 Two sequential try-blocks with no isolation between them. An exception from the first block propagates out of `load()`, so the second block never runs even if that file is fine. Confirmed by hand: corrupt `isolation_forest_scratch.joblib` + valid `multi_pattern_detector.joblib` → `registry.has_multi_pattern` returns `False`.
 
-**Fixed**: independent try/except per model type, collecting errors and raising once at the end. 9 new tests in `mkt_surveillance_ml/tests/test_model_registry.py`. Coverage: 0% → 96%.
+**Fixed**: independent try/except per model type, collecting errors and raising once at the end. 9 new tests in `ml/tests/test_model_registry.py`. Coverage: 0% → 96%.
 
 ### 4. `get_model_registry()` lazy singleton has no lock
 
@@ -89,7 +89,7 @@ Global constraint, but every read path filters by `user_id`. Two users recording
 
 | Suite | Before | New tests | After | Status |
 |---|---|---|---|---|
-| `mkt_surveillance_ml/tests/` | 302 | +9 (`test_model_registry.py`) | 311 | **all pass** |
+| `ml/tests/` | 302 | +9 (`test_model_registry.py`) | 311 | **all pass** |
 | `tests/` (backend) | 156 | +5 (`test_integration_config.py`) | 161 | **all pass** |
 | **Total** | **458** | **+14** | **472** | |
 

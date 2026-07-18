@@ -4,7 +4,7 @@ tests/test_anomaly.py — Anomaly detection endpoint tests.
 Covers: score bounds, threshold logic, feature storage, auth guards.
 
 PHASE 7 UPDATE: anomaly_service now scores with real trained
-mkt_surveillance_ml models instead of mock formulas (see
+ml models instead of mock formulas (see
 app/services/anomaly_service.py's module docstring). This changed two
 things tests must account for, deliberately, not incidentally:
 
@@ -16,7 +16,7 @@ things tests must account for, deliberately, not incidentally:
    used deliberately by test_insufficient_history_returns_400.
 
 2. The feature set changed (mock's price_return/price_range/
-   volume_zscore/price_volatility/body_ratio -> mkt_surveillance_ml's
+   volume_zscore/price_volatility/body_ratio -> ml's
    return/volume_ratio_20d/volatility_20d), and xgboost_score was
    renamed to multi_pattern_max_score (see migration 004 and its
    docstring for why: the old name was never accurate even for the mock,

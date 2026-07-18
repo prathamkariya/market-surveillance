@@ -19,7 +19,7 @@ passlib[bcrypt]==1.7.4
 slowapi==0.1.9
 
 # ── ML (Phase 7 — real trained models) ───────────────────────────────
-# Install with: pip install -e ./mkt_surveillance_ml
+# Install with: pip install -e ./ml
 
 # ── Phase 8: Streaming ingestion & live data ──────────────────────────
 redis==5.0.8              # Redis Streams client

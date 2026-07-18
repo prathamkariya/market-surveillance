@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Install the ml package correctly
-RUN pip install -e mkt_surveillance_ml/
+RUN pip install -e ml/
 
 # Expose port
 EXPOSE 8000

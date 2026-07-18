@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     # ML model artifacts (Phase 7) — directory produced by
-    # mkt_surveillance_ml's scripts/train.py (both multi_pattern_detector
+    # ml's scripts/train.py (both multi_pattern_detector
     # and isolation_forest_scratch artifacts, if trained, live here together)
     MODEL_DIR: str = "trained_models"
 

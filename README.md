@@ -3,7 +3,7 @@
 A production-ready market anomaly detection system consisting of two tightly integrated components:
 
 - **FastAPI backend** — REST API with JWT auth, OHLCV ingestion, anomaly detection, alerts, and watchlists
-- **`mkt_surveillance_ml`** — installable Python ML package with from-scratch implementations of Isolation Forest, Multi-Pattern Detector (XGBoost), ARIMA, Prophet, and LSTM
+- **`ml`** — installable Python ML package with from-scratch implementations of Isolation Forest, Multi-Pattern Detector (XGBoost), ARIMA, Prophet, and LSTM
 
 ---
 
@@ -20,8 +20,8 @@ market-surveillance/
 │   ├── database.py          # Engine + session factory
 │   ├── dependencies.py      # FastAPI dependency injection (get_current_user, etc.)
 │   └── config.py            # Pydantic Settings (reads .env)
-├── mkt_surveillance_ml/     # ML package (pip install -e mkt_surveillance_ml)
-│   ├── src/mkt_surveillance_ml/
+├── ml/     # ML package (pip install -e ml)
+│   ├── src/ml/
 │   │   ├── anomaly/         # IsolationForestScratch
 │   │   ├── detection/       # MultiPatternDetector, WeakLabeling
 │   │   ├── time_series/     # ARIMA+Prophet, LSTM, stationarity tests
@@ -57,7 +57,7 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # macOS/Linux
 
-pip install -e mkt_surveillance_ml
+pip install -e ml
 pip install -r requirements.txt
 ```
 
@@ -65,7 +65,7 @@ pip install -r requirements.txt
 
 ```bash
 # Train both anomaly detection models and save to trained_models/
-python mkt_surveillance_ml/scripts/train.py --output-dir trained_models/
+python ml/scripts/train.py --output-dir trained_models/
 ```
 
 ### 3. Start with Docker Compose
@@ -89,7 +89,7 @@ alembic upgrade head
 ### ML package (no database required)
 
 ```bash
-.venv\Scripts\pytest mkt_surveillance_ml/tests/ -v
+.venv\Scripts\pytest ml/tests/ -v
 ```
 
 Expected: **307 passed, 4 skipped** (Prophet tests require working `cmdstanpy` binary — known Windows env issue, unrelated to ML logic).

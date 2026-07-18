@@ -133,7 +133,7 @@ class TestDeadCodeRemoved:
 #
 # `COPY pyproject.toml poetry.lock ./` -- neither file exists at the
 # repo root (the only pyproject.toml in this whole project is
-# mkt_surveillance_ml/pyproject.toml, a different subproject). Every
+# ml/pyproject.toml, a different subproject). Every
 # other setup doc in this repo (requirements.txt itself,
 # PHASE7_INTEGRATION.md's "Setup to actually run this",
 # apply_phase7.py's printed next-steps) says pip + requirements.txt.
@@ -168,7 +168,7 @@ class TestDockerfileReferencesExistingFiles:
             f"COPY step. The project uses requirements.txt (confirmed present at repo "
             f"root) everywhere else, not Poetry. Fix: replace the poetry install block "
             f"with `COPY requirements.txt . RUN pip install --no-cache-dir -r requirements.txt` "
-            f"(plus `RUN pip install -e mkt_surveillance_ml/`, which the Dockerfile "
+            f"(plus `RUN pip install -e ml/`, which the Dockerfile "
             f"already does correctly one line down)."
         )
 
@@ -282,7 +282,7 @@ class TestModelRegistrySingletonRace:
         code does.)
         """
         import app.services.anomaly_service as anomaly_service
-        from mkt_surveillance_ml.serving.model_registry import ModelRegistry
+        from ml.serving.model_registry import ModelRegistry
         import joblib
 
         joblib.dump(_DummyMultiPatternForRaceTest(), tmp_path / "multi_pattern_detector.joblib")

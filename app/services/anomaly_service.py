@@ -3,25 +3,25 @@ app/services/anomaly_service.py — real ML scoring (Phase 7).
 
 Replaces the Phase 1/2 mock scoring functions (hand-coded formulas,
 explicitly commented "In Phase 3: replaced with a real trained model")
-with the actual trained mkt_surveillance_ml package: IsolationForestScratch
+with the actual trained ml package: IsolationForestScratch
 (unsupervised) and MultiPatternDetector (per-pattern supervised).
 
 Feature computation is NOT reimplemented here. It calls
-compute_engineered_features from mkt_surveillance_ml.data.synthetic
+compute_engineered_features from ml.data.synthetic
 directly -- the exact function every model in that package was trained
 against. Recomputing the same three features (return, volume_ratio_20d,
 volatility_20d) a second time, by hand, in this file would risk two
 independent implementations silently drifting apart -- exactly the
-kind of duplication mkt_surveillance_ml's own README flags as the
+kind of duplication ml's own README flags as the
 reason data/synthetic.py exists as a single source of truth in the
 first place.
 
 Note the feature set changed from the mock version's 5 hand-coded
 features (price_return, price_range, volume_zscore, price_volatility,
-body_ratio, using full OHLC) to mkt_surveillance_ml's 3 (return,
+body_ratio, using full OHLC) to ml's 3 (return,
 volume_ratio_20d, volatility_20d, using close+volume only). This is a
 real, deliberate change -- the mock's features were never validated
-against anything; mkt_surveillance_ml's have 300+ tests behind them --
+against anything; ml's have 300+ tests behind them --
 not an accidental behavior change to paper over.
 """
 import json
@@ -36,9 +36,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Anomaly, MarketData
-from mkt_surveillance_ml.config import BASE_FEATURE_COLUMNS, MIN_RAW_ROWS_FOR_FEATURES
-from mkt_surveillance_ml.data.synthetic import compute_engineered_features
-from mkt_surveillance_ml.serving.model_registry import ModelRegistry, ModelLoadError
+from ml.config import BASE_FEATURE_COLUMNS, MIN_RAW_ROWS_FOR_FEATURES
+from ml.data.synthetic import compute_engineered_features
+from ml.serving.model_registry import ModelRegistry, ModelLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -109,18 +109,18 @@ def get_model_registry(market: str = "CRYPTO") -> ModelRegistry:
 
 
 # ──────────────────────────────────────────────
-# Feature engineering — delegates entirely to mkt_surveillance_ml
+# Feature engineering — delegates entirely to ml
 # ──────────────────────────────────────────────
 def _market_data_to_feature_row(record: MarketData, historical: list[MarketData]) -> dict:
     """Builds the same 3 engineered features (return, volume_ratio_20d,
-    volatility_20d) every mkt_surveillance_ml model is trained on, for
+    volatility_20d) every ml model is trained on, for
     the single most recent row (`record`), using `historical` as the
     trailing context the rolling-window features need.
 
     Raises HTTPException(400) if there isn't enough history -- silently
     scoring against a partially-computed or default-filled feature
     vector would produce a confident-looking but meaningless number,
-    exactly the kind of failure mode mkt_surveillance_ml's own input
+    exactly the kind of failure mode ml's own input
     validation (see its serving layer's ScoreRequest schema) is built
     to catch rather than paper over.
     """
@@ -264,7 +264,7 @@ def detect_anomaly(
     Steps:
     1. Fetch the record (404 if not found or wrong user)
     2. Fetch trailing history for the same symbol (for rolling features)
-    3. Compute features via mkt_surveillance_ml's compute_engineered_features
+    3. Compute features via ml's compute_engineered_features
     4. Score with whichever of IsolationForestScratch / MultiPatternDetector
        are loaded (503 if neither is available)
     5. Store the Anomaly record, including the full per-pattern breakdown
@@ -312,7 +312,7 @@ def detect_anomaly(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "No trained models available. Train at least one with "
-                "mkt_surveillance_ml's scripts/train.py and point MODEL_DIR "
+                "ml's scripts/train.py and point MODEL_DIR "
                 "at the output directory."
             ),
         )

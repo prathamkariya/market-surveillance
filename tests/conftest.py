@@ -228,7 +228,7 @@ def sample_market_data(client, auth_headers) -> dict:
 @pytest.fixture(scope="session", autouse=True)
 def trained_models_for_tests(tmp_path_factory):
     """
-    Trains real mkt_surveillance_ml models ONCE for the whole test
+    Trains real ml models ONCE for the whole test
     session (training takes real seconds; doing it per-test would be
     wasteful) and points settings.MODEL_DIR at them.
 
@@ -237,10 +237,10 @@ def trained_models_for_tests(tmp_path_factory):
     detection tests need it to get a real score; other tests are
     unaffected by its presence.
     """
-    from mkt_surveillance_ml.data.synthetic import generate_synthetic_market_data
-    from mkt_surveillance_ml.detection.multi_pattern import MultiPatternDetector
-    from mkt_surveillance_ml.anomaly.isolation_forest import IsolationForestScratch
-    from mkt_surveillance_ml.config import BASE_FEATURE_COLUMNS
+    from ml.data.synthetic import generate_synthetic_market_data
+    from ml.detection.multi_pattern import MultiPatternDetector
+    from ml.anomaly.isolation_forest import IsolationForestScratch
+    from ml.config import BASE_FEATURE_COLUMNS
     import joblib
     import json as json_module
     from datetime import datetime, timezone
@@ -276,7 +276,7 @@ def sample_market_data_with_history(client, auth_headers) -> dict:
     clear MIN_RAW_ROWS_FOR_FEATURES=21 with margin) and returns the
     response body for the LAST one -- same return contract as
     sample_market_data, but with enough trailing history for
-    mkt_surveillance_ml's rolling-window features to actually compute.
+    ml's rolling-window features to actually compute.
     """
     import numpy as np
     from datetime import datetime, timedelta
