@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mkt-surveillance-ml"
+name = "ml"
 version = "0.2.0"
 description = "Market Surveillance ML: feature engineering, classical ML, anomaly detection, and time series (ARIMA/Prophet/LSTM) for manipulation detection"
 requires-python = ">=3.10"

@@ -98,14 +98,22 @@ async def run():
     consumer_name = os.getenv("ENGINE_CONSUMER_NAME", f"engine_{gethostname()}_{os.getpid()}")
     
     logger.info("Engine listening for live trades...")
+    last_claim_check = 0.0
     while True:
         try:
-            batch = await claim_pending_trades(
-                group_name="engine_group",
-                consumer_name=consumer_name,
-                min_idle_ms=60_000,
-                count=50,
-            )
+            now = time.time()
+            batch = None
+            
+            # Check for crashed-worker pending trades periodically, not every loop
+            if now - last_claim_check > 60:
+                batch = await claim_pending_trades(
+                    group_name="engine_group",
+                    consumer_name=consumer_name,
+                    min_idle_ms=60_000,
+                    count=50,
+                )
+                last_claim_check = now
+                
             if not batch:
                 batch = await read_trades_blocking(
                     group_name="engine_group",

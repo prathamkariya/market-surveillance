@@ -44,6 +44,7 @@ async def get_mar_report(
     system_user = db.query(User).filter(User.email == "system@marketsurveillance.local").first()
     system_user_id = system_user.id if system_user else None
     
+    # system-detected anomalies are visible to all authenticated users; personally-submitted anomalies remain private
     if md.user_id != current_user.id and md.user_id != system_user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

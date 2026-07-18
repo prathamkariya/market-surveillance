@@ -37,6 +37,7 @@ def _write_valid_iforest(model_dir, metadata=None):
     joblib.dump(_FakeIsolationForest(), model_dir / "isolation_forest_scratch.joblib")
     if metadata is not None:
         (model_dir / "isolation_forest_metadata.json").write_text(metadata)
+    (model_dir / "symbol_baselines.json").write_text("{}")
 
 
 def _write_valid_multi_pattern(model_dir, metadata=None):

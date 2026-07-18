@@ -94,6 +94,7 @@ def _normalise_bybit(raw: dict) -> list[UnifiedTradeEvent]:
             price: float = float(trade["p"])
             volume: float = float(trade["v"])
             ts_ms: int = int(trade["T"])
+            # S == "Sell" means the taker sold, so the buyer was passive (maker) — this was previously inverted.
             is_buyer_maker: bool = trade.get("S") == "Sell"
 
             events.append(
