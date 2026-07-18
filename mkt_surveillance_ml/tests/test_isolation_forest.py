@@ -174,6 +174,30 @@ class TestIsolationForestScratch:
         model_2 = IsolationForestScratch(n_estimators=30, random_state=5).fit(X)
         assert np.array_equal(model_1.predict(X), model_2.predict(X))
 
+    def test_single_row_scoring_matches_batch_scoring(self):
+        X, _ = make_anomaly_dataset()
+        model = IsolationForestScratch(n_estimators=50, contamination=0.05, random_state=1).fit(X)
+        batch_scores = model.score_samples(X)
+        
+        single_row_score = model.score_samples(X[:1])[0]
+        assert batch_scores[0] == pytest.approx(single_row_score, rel=1e-5)
+
+    def test_new_point_single_row_scoring_reflects_actual_anomalousness(self):
+        X, _ = make_anomaly_dataset()
+        model = IsolationForestScratch(n_estimators=50, contamination=0.05, random_state=1).fit(X)
+        
+        # A completely new point not in the training set (near mean)
+        new_normal_point = np.array([[0.1, -0.1]])
+        new_normal_score = model.score_samples(new_normal_point)[0]
+        
+        # A completely new point far outside training distribution
+        new_anomalous_point = np.array([[20.0, -25.0]])
+        new_anomalous_score = model.score_samples(new_anomalous_point)[0]
+        
+        assert new_normal_score > 0.0
+        assert new_anomalous_score > 0.0
+        assert new_anomalous_score > new_normal_score + 0.1
+
 
 class TestContaminationSensitivitySweep:
     def test_n_flagged_scales_with_contamination(self):

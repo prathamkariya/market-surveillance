@@ -143,12 +143,14 @@ class IsolationForestScratch:
         self.trees: list[IsolationTreeNode] = []
         self.max_depth_: int | None = None
         self.threshold_: float | None = None
+        self.n_samples_fit_: int | None = None
 
     def fit(self, X: np.ndarray) -> "IsolationForestScratch":
         X = np.asarray(X)
         rng = np.random.RandomState(self.random_state)
         n_samples = X.shape[0]
         subsample_size = min(self.max_samples, n_samples)
+        self.n_samples_fit_ = subsample_size
         # ceil(log2(subsample_size)): the expected depth for isolating a
         # POINT SAMPLED AT RANDOM in a tree over subsample_size points --
         # trees deeper than this mostly measure noise, not signal.
@@ -168,14 +170,16 @@ class IsolationForestScratch:
         """Higher = more anomalous. See class docstring for why this is
         the OPPOSITE convention from sklearn.IsolationForest.score_samples.
 
-        c(n) normalization uses len(X) -- the size of the set being
-        scored -- matching file 27 Block 2/3 exactly (anomaly_score_formula
-        is called with len(X_anomaly), the full dataset, not the
-        per-tree subsample size used during fitting)."""
-        if not self.trees:
+        c(n) normalization uses the number of samples the trees were
+        actually built from (`self.n_samples_fit_`, capped at `max_samples`),
+        not the size of the array being scored. This is intentional so that
+        scoring one point at a time (the live-inference case) and scoring a
+        full batch (the offline-evaluation case) produce comparable,
+        consistent scores for the same underlying data."""
+        if not self.trees or getattr(self, 'n_samples_fit_', None) is None:
             raise RuntimeError("Call fit() before score_samples().")
         X = np.asarray(X)
-        n_samples_for_normalization = len(X)
+        n_samples_for_normalization = self.n_samples_fit_
         scores = np.zeros(len(X))
         for i, point in enumerate(X):
             avg_path = np.mean([path_length(point, tree) for tree in self.trees])

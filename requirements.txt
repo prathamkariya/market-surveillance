@@ -20,7 +20,6 @@ slowapi==0.1.9
 
 # ── ML (Phase 7 — real trained models) ───────────────────────────────
 # Install with: pip install -e ./mkt_surveillance_ml
-mkt-surveillance-ml
 
 # ── Phase 8: Streaming ingestion & live data ──────────────────────────
 redis==5.0.8              # Redis Streams client
