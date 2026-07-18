@@ -172,10 +172,15 @@ def _apply_zscores(features: dict, symbol: str, registry: ModelRegistry) -> Opti
     norm_features = features.copy()
     for col in ["return", "volatility_20d"]:
         stats = baseline.get(col)
-        if stats and stats.get("mean") is not None and stats.get("std") is not None:
-            mean = stats["mean"]
-            std = stats["std"]
-            norm_features[col] = (features[col] - mean) / std
+        if not (stats and stats.get("mean") is not None and stats.get("std") not in (None, 0)):
+            logger.error(
+                "Malformed baseline for symbol=%s column=%s: missing or invalid mean/std. Refusing to score with partial normalization.",
+                symbol, col,
+            )
+            return None
+        mean = stats["mean"]
+        std = stats["std"]
+        norm_features[col] = (features[col] - mean) / std
     return norm_features
 
 
@@ -309,7 +314,7 @@ def detect_anomaly(
         if norm_features is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Baseline not found for symbol '{record.symbol}'. Please retrain the model to include this symbol.",
+                detail=f"Baseline missing or malformed for symbol '{record.symbol}'. Please retrain the model to include this symbol properly.",
             )
         zscored_features = norm_features
         
@@ -386,8 +391,9 @@ def score_live_trade(
         the UI and any downstream consumers can surface that distinction rather
         than silently treating a polled candle the same as a live WebSocket tick.
     """
-    source: str = trade.get("source", "")
-    is_low_confidence: bool = source.upper() == "YFINANCE"
+    source: str = trade.get("source", "UNKNOWN")
+    # Polling fallbacks (YFINANCE) and malformed/missing sources (UNKNOWN) are marked low-confidence
+    is_low_confidence: bool = source.upper() not in {"BINANCE", "BYBIT", "UPSTOX", "ALPACA", "FINNHUB"}
 
     # 1. Feature engineering
     all_records = historical_trades + [trade]
@@ -435,7 +441,15 @@ def score_live_trade(
                 confidence="model_unavailable",
                 features=raw_features,
             )
-        return None
+        return _make_unavailable_sentinel(
+            trade=trade,
+            market=market,
+            source=source,
+            is_low_confidence=is_low_confidence,
+            sentiment_score=sentiment_score,
+            confidence="no_model_high_confidence",
+            features=raw_features,
+        )
 
     # Apply per-symbol z-score transformation if model was trained with z-scores
     zscored_features = raw_features.copy()
@@ -453,7 +467,15 @@ def score_live_trade(
                     confidence="baseline_unavailable",
                     features=raw_features,
                 )
-            return None
+            return _make_unavailable_sentinel(
+                trade=trade,
+                market=market,
+                source=source,
+                is_low_confidence=is_low_confidence,
+                sentiment_score=sentiment_score,
+                confidence="no_baseline_high_confidence",
+                features=raw_features,
+            )
         zscored_features = norm_features
         
         # Explicit assertion: volume_ratio_20d should NEVER be transformed by _apply_zscores

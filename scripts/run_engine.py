@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 # Ensure repo root is on path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -42,15 +43,34 @@ logger = logging.getLogger("run_engine")
 STREAM_ALERTS = "live_alerts"
 HISTORY_PREFIX = "history:"
 
+_last_disarmed_log_time = {}
+
+_last_successful_sentiment = {}
+_last_sentiment_warning = {}
+
 async def get_latest_sentiment(client, symbol: str) -> float:
     """Fetch the most recent sentiment score for a symbol."""
     val = await client.hget("latest_sentiment", symbol)
-    if val is None:
-        return 0.0
-    try:
-        return float(val)
-    except ValueError:
-        return 0.0
+    now = time.time()
+
+    if val is not None:
+        _last_successful_sentiment[symbol] = now
+        try:
+            return float(val)
+        except ValueError:
+            pass
+            
+    # Cache miss or invalid value
+    # Default to now if we've never seen it, so we don't instantly warn
+    last_success = _last_successful_sentiment.setdefault(symbol, now)
+    
+    if now - last_success > 300:
+        last_warn = _last_sentiment_warning.get(symbol, 0)
+        if now - last_warn > 300:
+            logger.warning("No sentiment data for %s in >5m; defaulting to neutral 0.0", symbol)
+            _last_sentiment_warning[symbol] = now
+            
+    return 0.0
 
 
 async def update_and_get_history(client, trade: dict) -> list[dict]:
@@ -81,6 +101,16 @@ async def run():
                 continue
             
             for entry_id, trade in batch:
+                market = trade.get("market")
+                if market is None:
+                    logger.error(
+                        "Dropping malformed tick: missing 'market' field. symbol=%s source=%s",
+                        trade.get("symbol", "?"), trade.get("source", "?")
+                    )
+                    # Ack it so we don't get stuck in a poison pill loop
+                    await client.xack(STREAM_TRADES, "engine_group", entry_id)
+                    continue
+
                 # 1. Update history
                 history = await update_and_get_history(client, trade)
                 
@@ -88,13 +118,9 @@ async def run():
                 sentiment = await get_latest_sentiment(client, trade["symbol"])
                 
                 # 3. Score — route to the correct per-market model registry.
-                # trade["market"] comes from UnifiedTradeEvent.market set by each adapter.
-                # Defaults to CRYPTO if somehow absent.
-                market = trade.get("market", "CRYPTO")
                 alert = score_live_trade(trade, history, sentiment, market=market)
 
-                
-                if alert:
+                if alert is not None:
                     # model_unavailable sentinel: ingested but no trained model yet.
                     # Log at DEBUG (not WARNING) and skip DB/stream publish.
                     if alert.get("confidence") == "model_unavailable":
@@ -102,6 +128,24 @@ async def run():
                             "No model for market=%s symbol=%s source=%s — coverage pending",
                             alert.get("market"), alert.get("symbol"), alert.get("source"),
                         )
+                    elif alert.get("confidence") == "no_model_high_confidence":
+                        now = time.time()
+                        mkt = alert.get("market")
+                        if now - _last_disarmed_log_time.get(mkt, 0) > 300:
+                            logger.warning(
+                                "ENGINE DISARMED: no model loaded for market=%s — trades are being ingested but NOT scored",
+                                mkt
+                            )
+                            _last_disarmed_log_time[mkt] = now
+                    elif alert.get("confidence") == "no_baseline_high_confidence":
+                        now = time.time()
+                        sym = alert.get("symbol")
+                        if now - _last_disarmed_log_time.get(f"baseline_{sym}", 0) > 300:
+                            logger.warning(
+                                "ENGINE PARTIALLY DISARMED: no valid baseline for symbol=%s — trades are being ingested but NOT scored",
+                                sym
+                            )
+                            _last_disarmed_log_time[f"baseline_{sym}"] = now
                     elif alert.get("anomaly_score") is not None:
                         confidence_tag = " [LOW CONFIDENCE — polled data]" if alert.get("low_confidence") else ""
                         logger.warning(
