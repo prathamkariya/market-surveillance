@@ -277,7 +277,7 @@ def detect_anomaly(
     historical = list(reversed(historical))  # chronological order
 
     # 3. Feature engineering (raises 400 if insufficient history)
-    features = _market_data_to_feature_row(record, historical)
+    raw_features = _market_data_to_feature_row(record, historical)
 
     # 4. Route to the correct per-market model registry.
     market = record.market
@@ -302,29 +302,37 @@ def detect_anomaly(
         )
 
     # Apply per-symbol z-score transformation if model was trained with z-scores
+    zscored_features = raw_features.copy()
     baselines = getattr(registry, "symbol_baselines", {})
     if baselines:
-        norm_features = _apply_zscores(features, record.symbol, registry)
+        norm_features = _apply_zscores(raw_features, record.symbol, registry)
         if norm_features is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Baseline not found for symbol '{record.symbol}'. Please retrain the model to include this symbol.",
             )
-        features = norm_features
+        zscored_features = norm_features
+        
+        # Explicit assertion: volume_ratio_20d should NEVER be transformed by _apply_zscores
+        assert raw_features["volume_ratio_20d"] == zscored_features["volume_ratio_20d"], (
+            "volume_ratio_20d was modified by z-score transformation! This feature must remain raw."
+        )
 
     isolation_forest_score = None
     multi_pattern_max_score = None
     pattern_scores: Optional[dict] = None
     model_versions = []
 
-    X_row = pd.DataFrame([features], columns=BASE_FEATURE_COLUMNS)
-
     if registry.has_isolation_forest:
-        isolation_forest_score = float(registry.isolation_forest.score_samples(X_row.values)[0])
+        # IF was retrained on z-scored features
+        X_row_if = pd.DataFrame([zscored_features], columns=BASE_FEATURE_COLUMNS)
+        isolation_forest_score = float(registry.isolation_forest.score_samples(X_row_if.values)[0])
         model_versions.append(f"isolation_forest={registry.isolation_forest_metadata.get('trained_at_utc', 'unknown')}")
 
     if registry.has_multi_pattern:
-        proba_row = registry.multi_pattern_detector.predict_proba(X_row).iloc[0]
+        # MPD was trained on raw features
+        X_row_mpd = pd.DataFrame([raw_features], columns=BASE_FEATURE_COLUMNS)
+        proba_row = registry.multi_pattern_detector.predict_proba(X_row_mpd).iloc[0]
         pattern_scores = {col.replace("proba_", ""): float(val) for col, val in proba_row.items()}
         multi_pattern_max_score = max(pattern_scores.values())
         model_versions.append(f"multi_pattern={registry.multi_pattern_metadata.get('trained_at_utc', 'unknown')}")
@@ -332,7 +340,7 @@ def detect_anomaly(
     combined = _combine_scores(isolation_forest_score, multi_pattern_max_score)
     is_anomaly = combined >= threshold
 
-    # 5. Store
+    # 5. Store (Persist RAW features for downstream compliance reports, not z-scored)
     anomaly = Anomaly(
         market_data_id=record.id,
         anomaly_score=combined,
@@ -341,7 +349,7 @@ def detect_anomaly(
         multi_pattern_max_score=multi_pattern_max_score,
         pattern_scores=json.dumps(pattern_scores) if pattern_scores is not None else None,
         model_version="; ".join(model_versions),
-        features=json.dumps(features),
+        features=json.dumps(raw_features),
     )
     db.add(anomaly)
     db.commit()
@@ -404,7 +412,7 @@ def score_live_trade(
         return None
 
     last_row = features_df.iloc[-1]
-    features = {col: float(last_row[col]) for col in BASE_FEATURE_COLUMNS}
+    raw_features = {col: float(last_row[col]) for col in BASE_FEATURE_COLUMNS}
 
     # Sentiment fusion is explicitly deferred.
     # It needs to be a proper input feature to the ML model (retraining required),
@@ -425,14 +433,15 @@ def score_live_trade(
                 is_low_confidence=is_low_confidence,
                 sentiment_score=sentiment_score,
                 confidence="model_unavailable",
-                features=features,
+                features=raw_features,
             )
         return None
 
     # Apply per-symbol z-score transformation if model was trained with z-scores
+    zscored_features = raw_features.copy()
     baselines = getattr(registry, "symbol_baselines", {})
     if baselines:
-        norm_features = _apply_zscores(features, trade["symbol"], registry)
+        norm_features = _apply_zscores(raw_features, trade["symbol"], registry)
         if norm_features is None:
             if is_low_confidence or market == "INDIA_EQUITY":
                 return _make_unavailable_sentinel(
@@ -442,22 +451,29 @@ def score_live_trade(
                     is_low_confidence=is_low_confidence,
                     sentiment_score=sentiment_score,
                     confidence="baseline_unavailable",
-                    features=features,
+                    features=raw_features,
                 )
             return None
-        features = norm_features
+        zscored_features = norm_features
+        
+        # Explicit assertion: volume_ratio_20d should NEVER be transformed by _apply_zscores
+        assert raw_features["volume_ratio_20d"] == zscored_features["volume_ratio_20d"], (
+            "volume_ratio_20d was modified by z-score transformation! This feature must remain raw."
+        )
 
     isolation_forest_score = None
     multi_pattern_max_score = None
     pattern_scores: Optional[dict] = None
 
-    X_row = pd.DataFrame([features], columns=BASE_FEATURE_COLUMNS)
-
     if registry.has_isolation_forest:
-        isolation_forest_score = float(registry.isolation_forest.score_samples(X_row.values)[0])
+        # IF was retrained on z-scored features
+        X_row_if = pd.DataFrame([zscored_features], columns=BASE_FEATURE_COLUMNS)
+        isolation_forest_score = float(registry.isolation_forest.score_samples(X_row_if.values)[0])
 
     if registry.has_multi_pattern:
-        proba_row = registry.multi_pattern_detector.predict_proba(X_row).iloc[0]
+        # MPD was trained on raw features
+        X_row_mpd = pd.DataFrame([raw_features], columns=BASE_FEATURE_COLUMNS)
+        proba_row = registry.multi_pattern_detector.predict_proba(X_row_mpd).iloc[0]
         pattern_scores = {col.replace("proba_", ""): float(val) for col, val in proba_row.items()}
         multi_pattern_max_score = max(pattern_scores.values())
 
@@ -484,5 +500,5 @@ def score_live_trade(
         "isolation_forest_score": isolation_forest_score,
         "multi_pattern_max_score": multi_pattern_max_score,
         "pattern_scores": pattern_scores,
-        "features": features,
+        "features": raw_features,
     }
