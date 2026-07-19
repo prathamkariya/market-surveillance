@@ -46,12 +46,11 @@ class TestCrossUserMarketDataCollision:
 
     def test_second_user_same_symbol_and_timestamp_gets_clean_response_not_500(self, client, auth_headers):
         """
-        EXPECTED TO FAIL against the current code -- and it fails in a
-        telling way: the second POST doesn't come back as a handled response
-        at all. TestClient's default (raise_server_exceptions=True) lets the
+        In the original codebase, the second POST didn't come back as a handled response
+        at all. TestClient's default (raise_server_exceptions=True) let the
         IntegrityError from db.commit() propagate straight out of
         client.post(...) as a raised exception, because
-        create_market_data() has no try/except around the commit to catch
+        create_market_data() had no try/except around the commit to catch
         it first. Against a real deployed server (uvicorn, not TestClient),
         Starlette's ServerErrorMiddleware would catch this same unhandled
         exception and turn it into a generic 500 for the actual HTTP
@@ -111,8 +110,6 @@ class TestCrossUserMarketDataCollision:
 class TestDeadCodeRemoved:
     def test_analysis_service_file_does_not_exist(self):
         """
-        EXPECTED TO FAIL against the current code.
-
         PHASE7_INTEGRATION.md section 2 ("Dead code removed") explicitly
         lists app/services/analysis_service.py as removed. It's still on
         disk. Fix: add it to apply_phase7.py's to_delete list and re-run,
@@ -142,7 +139,7 @@ class TestDeadCodeRemoved:
 # ══════════════════════════════════════════════════════════════
 class TestDockerfileReferencesExistingFiles:
     def test_every_copy_source_exists_in_build_context(self):
-        """EXPECTED TO FAIL against the current Dockerfile."""
+        """Verify every COPY source exists in build context."""
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
         missing = []
         for line in dockerfile.splitlines():
@@ -187,7 +184,7 @@ class TestDockerfileReferencesExistingFiles:
 # ══════════════════════════════════════════════════════════════
 class TestDockerComposeEnvVarsMatchSettings:
     def test_api_service_env_vars_are_real_settings_fields(self):
-        """EXPECTED TO FAIL against the current docker-compose.yml."""
+        """Verify api service env vars are real settings fields."""
         from app.config import Settings
         valid_fields = set(Settings.model_fields.keys())
 
@@ -229,8 +226,6 @@ class _DummyMultiPatternForRaceTest:
 class TestModelRegistrySingletonRace:
     def test_concurrent_caller_can_observe_a_still_loading_registry(self, tmp_path, monkeypatch):
         """
-        EXPECTED TO FAIL against the current get_model_registry().
-
         Sequence forced by the two Events below:
           1. Thread A calls get_model_registry(), sees _registry is None,
              constructs it, assigns it to the module global, then calls

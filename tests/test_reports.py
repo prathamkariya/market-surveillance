@@ -6,8 +6,8 @@ from unittest.mock import patch, MagicMock
 # MAR REPORT GENERATION (Phase 9 - Tests for IDOR & Edge cases)
 # ══════════════════════════════════════════════════════════════
 class TestMarReports:
-    @patch("app.services.mar_generator.genai.GenerativeModel")
-    def test_mar_report_missing_market_data_returns_404(self, mock_model, client, auth_headers, db_session):
+    @patch("app.services.mar_generator.genai.Client")
+    def test_mar_report_missing_market_data_returns_404(self, mock_client, client, auth_headers, db_session):
         from app.models import Alert, Anomaly, MarketData, User
         db = db_session
         user = db.query(User).filter(User.email == "test@example.com").first()
@@ -41,8 +41,8 @@ class TestMarReports:
         detail = response.json()["detail"].lower()
         assert "anomaly not found" in detail or "market data record" in detail
 
-    @patch("app.services.mar_generator.genai.GenerativeModel")
-    def test_mar_report_idor_blocked(self, mock_model, client, auth_headers, db_session):
+    @patch("app.services.mar_generator.genai.Client")
+    def test_mar_report_idor_blocked(self, mock_client, client, auth_headers, db_session):
         from app.models import Alert, Anomaly, MarketData, User
         db = db_session
         user_a = db.query(User).filter(User.email == "test@example.com").first()
@@ -75,8 +75,8 @@ class TestMarReports:
         assert response.status_code == 403
         assert "permission to access this report" in response.json()["detail"].lower()
 
-    @patch("app.services.mar_generator.genai.GenerativeModel")
-    def test_mar_report_works_without_alert(self, mock_model, client, auth_headers, db_session):
+    @patch("app.services.mar_generator.genai.Client")
+    def test_mar_report_works_without_alert(self, mock_client, client, auth_headers, db_session):
         """
         An Anomaly can exist without an Alert -- POST /alerts is a separate,
         optional user action, not something that happens automatically when
@@ -87,8 +87,8 @@ class TestMarReports:
         from app.models import Anomaly, MarketData, User
 
         mock_instance = MagicMock()
-        mock_instance.generate_content.return_value = MagicMock(text="# Mock MAR Report")
-        mock_model.return_value = mock_instance
+        mock_instance.models.generate_content.return_value = MagicMock(text="# Mock MAR Report")
+        mock_client.return_value = mock_instance
 
         db = db_session
         user = db.query(User).filter(User.email == "test@example.com").first()
@@ -114,13 +114,13 @@ class TestMarReports:
             "Alert.id instead of Anomaly.id"
         )
 
-    @patch("app.services.mar_generator.genai.GenerativeModel")
-    def test_mar_report_system_anomaly_is_public(self, mock_model, client, auth_headers, db_session):
+    @patch("app.services.mar_generator.genai.Client")
+    def test_mar_report_system_anomaly_is_public(self, mock_client, client, auth_headers, db_session):
         from app.models import Anomaly, MarketData, User
 
         mock_instance = MagicMock()
-        mock_instance.generate_content.return_value = MagicMock(text="# Mock MAR Report")
-        mock_model.return_value = mock_instance
+        mock_instance.models.generate_content.return_value = MagicMock(text="# Mock MAR Report")
+        mock_client.return_value = mock_instance
 
         db = db_session
         

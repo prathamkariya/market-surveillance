@@ -9,7 +9,8 @@ import logging
 import os
 
 from fastapi import HTTPException, status
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +58,19 @@ def generate_mar(context_data: dict) -> str:
     
     # 3. Call Gemini
     try:
-        genai.configure(api_key=api_key)
-        # Using gemini-1.5-flash for speed
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(
-            context,
-            request_options={"timeout": 30.0}
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=30000)
         )
-        
-        return response.text
+        try:
+            model_name = os.getenv("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
+            response = client.models.generate_content(
+                model=model_name,
+                contents=context,
+            )
+            return response.text
+        finally:
+            client.close()
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
         raise HTTPException(

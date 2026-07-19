@@ -21,16 +21,9 @@ def create_market_data(
 ):
     """Ingest one OHLCV candle for the authenticated user.
 
-    NOTE: MarketData's (symbol, timestamp) uniqueness is currently enforced
-    globally, not per-user (see uq_market_data_symbol_timestamp in
-    001_initial_schema.py) -- so two different users ingesting the same
-    symbol+timestamp collide here even though every read path in this
-    service treats MarketData as owned per-user. Catching the conflict and
-    returning 409 stops it from surfacing as an unhandled 500; it does not
-    by itself resolve which of the two users' OHLCV values should be
-    considered authoritative. If MarketData is meant to be genuinely
-    per-user, the real fix is scoping the constraint to
-    (user_id, symbol, timestamp) instead.
+    NOTE: MarketData's uniqueness is enforced per-user via the
+    uq_market_data_user_symbol_timestamp constraint. Collisions
+    return a 409 Conflict.
     """
     def infer_market(symbol: str) -> str:
         # Crypto: typically ends in USDT, BTC, ETH, or contains a hyphen/slash
@@ -53,12 +46,14 @@ def create_market_data(
     db.add(record)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Market data for {payload.symbol} at {payload.timestamp} already exists.",
-        )
+        if "uq_market_data_user_symbol_timestamp" in str(e.orig):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Market data for {payload.symbol} at {payload.timestamp} already exists.",
+            )
+        raise
     db.refresh(record)
     return record
 

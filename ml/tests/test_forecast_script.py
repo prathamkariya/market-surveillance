@@ -9,11 +9,27 @@ import pytest
 SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "forecast.py"
 
 
+import tempfile
+
 def run_script(args: list[str], timeout: int = 180) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT_PATH)] + args,
-        capture_output=True, text=True, timeout=timeout,
-    )
+    """Run a script and capture output robustly via temp files to avoid Windows pipe limits/debugpy issues."""
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as out, tempfile.TemporaryFile(mode="w+", encoding="utf-8") as err:
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT_PATH)] + args,
+            stdout=out, stderr=err, text=True, encoding="utf-8"
+        )
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(
+            process.args, process.returncode, out.read(), err.read()
+        )
 
 
 @pytest.fixture(scope="module")

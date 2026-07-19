@@ -41,7 +41,7 @@ upstox-python-sdk==2.13.0 # Upstox WebSocket & REST (Primary India)
 praw==7.7.1               # Reddit API (Python Reddit API Wrapper)
 
 # Phase 9: AI Report Generation
-google-generativeai==0.8.3  # Google Gemini API for Auto-MAR PDF drafts
+google-genai==2.12.1  # Google Gemini API for Auto-MAR PDF drafts
 
 # Phase 8: Explainability
 shap==0.46.0              # SHAP feature-importance for anomaly explanations
