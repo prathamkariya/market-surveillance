@@ -79,6 +79,12 @@ class Settings(BaseSettings):
                 port=int(self.POSTGRES_PORT),
                 database=self.POSTGRES_DB
             ).render_as_string(hide_password=False)
+            
+        if self.APP_ENV != "development" and self.DATABASE_URL and "REPLACE_ME_WITH_SECURE_PASSWORD" in self.DATABASE_URL:
+            raise ValueError(
+                "DATABASE_URL contains the default placeholder REPLACE_ME_WITH_SECURE_PASSWORD. "
+                "You must replace it with a real secure password before running in production."
+            )
         return self
 
 
