@@ -6,14 +6,14 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database components
     POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "password"
+    POSTGRES_PASSWORD: str
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "market_surveillance"
     DATABASE_URL: str | None = None
 
     # JWT — Access tokens
-    SECRET_KEY: str = "change-this-in-production-use-openssl-rand-hex-32"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
@@ -44,28 +44,19 @@ class Settings(BaseSettings):
         case_sensitive = True
         extra = "ignore"
 
-    _WEAK_SECRETS = {
-        "change-this-in-production-use-openssl-rand-hex-32",
-        "dev_secret_key_change_me",
-        "super_secret_production_key_change_me",
-    }
-
-    @model_validator(mode="after")
-    def _check_secret_key(self) -> "Settings":
-        import warnings
-        if self.SECRET_KEY in self._WEAK_SECRETS:
-            if self.APP_ENV != "development":
-                raise ValueError(
-                    "SECRET_KEY is still set to a default placeholder value. "
-                    "Generate a secure key with: openssl rand -hex 32 "
-                    "and set it in your environment before running in production."
-                )
-            warnings.warn(
-                "SECRET_KEY is using a known insecure placeholder. "
-                "This is only acceptable in APP_ENV=development.",
-                stacklevel=2,
-            )
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_dev_defaults(cls, data: dict) -> dict:
+        import os
+        # APP_ENV may not be in data if relying on the class default or env file,
+        # but pydantic hasn't merged env vars fully into `data` in mode="before"
+        # wait, actually for BaseSettings, `data` contains the env vars + init kwargs.
+        # But just in case, we also check os.getenv.
+        env = data.get("APP_ENV", os.getenv("APP_ENV", "development"))
+        if env == "development":
+            data.setdefault("SECRET_KEY", "change-this-in-production-use-openssl-rand-hex-32")
+            data.setdefault("POSTGRES_PASSWORD", "password")
+        return data
 
     @model_validator(mode="after")
     def _build_db_url(self) -> "Settings":

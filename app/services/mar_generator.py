@@ -63,7 +63,7 @@ def generate_mar(context_data: dict) -> str:
             http_options=types.HttpOptions(timeout=30000)
         )
         try:
-            model_name = os.getenv("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
+            model_name = os.getenv("GEMINI_MODEL", "").strip() or "gemini-3.5-flash"
             response = client.models.generate_content(
                 model=model_name,
                 contents=context,
