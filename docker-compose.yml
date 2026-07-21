@@ -30,7 +30,7 @@ services:
 
   # ── FastAPI application (unchanged) ──
   api:
-    build: .
+    build: ./backend
     ports:
       - "8000:8000"
     environment:
@@ -47,11 +47,11 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./backend:/app
 
   # ── ML Engine (consumes trades, scores anomalies) ──
   engine:
-    build: .
+    build: ./backend
     command: python scripts/run_engine.py
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -66,12 +66,12 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./backend:/app
     restart: unless-stopped
 
   # ── Market Adapters (ingest trades into Redis) ──
   crypto_worker:
-    build: .
+    build: ./backend
     command: python scripts/market_adapters/crypto_worker.py
     environment:
       - REDIS_URL=redis://redis:6379/0
@@ -81,11 +81,11 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./backend:/app
     restart: unless-stopped
 
   us_worker:
-    build: .
+    build: ./backend
     command: python scripts/market_adapters/us_worker.py
     environment:
       - REDIS_URL=redis://redis:6379/0
@@ -96,7 +96,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ./backend:/app
     restart: unless-stopped
 
 volumes:

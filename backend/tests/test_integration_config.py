@@ -188,7 +188,7 @@ class TestDockerComposeEnvVarsMatchSettings:
         from app.config import Settings
         valid_fields = set(Settings.model_fields.keys())
 
-        compose_text = (REPO_ROOT / "docker-compose.yml").read_text()
+        compose_text = (REPO_ROOT.parent / "docker-compose.yml").read_text()
         # crude but sufficient block extraction: from "api:" service's
         # "environment:" list to the next top-level-ish key
         api_block = compose_text.split("api:", 1)[1]
