@@ -1,8 +1,8 @@
 import os
 try:
     os.environ["APP_ENV"] = "production"
-    # Ensure it's not picking up from `.env` in the current dir if it has dummy values
-    # Actually pydantic-settings reads `.env` by default if env_file=".env"
+    os.environ["SECRET_KEY"] = "change-this-in-production-use-openssl-rand-hex-32"
+    os.environ["POSTGRES_PASSWORD"] = "password"
     from app.config import get_settings
     get_settings.cache_clear()
     s = get_settings()
