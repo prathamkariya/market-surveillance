@@ -126,6 +126,20 @@ class AnomalyResponse(OrmBase):
     detected_at: datetime
 
 
+class AnomalyListResponse(AnomalyResponse):
+    """Adds joined fields from MarketData for the list view."""
+    symbol: str
+    market_timestamp: datetime
+    market: Optional[str] = None
+
+
+class AnomalyPaginatedResponse(BaseModel):
+    items: List[AnomalyListResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 # ══════════════════════════════════════════════════════════════
 # ALERT SCHEMAS
 # ══════════════════════════════════════════════════════════════

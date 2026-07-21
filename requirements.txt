@@ -27,7 +27,7 @@ websockets>=13.0.0,<17.0          # Raw WebSocket client for Binance/Bybit publi
 aiohttp==3.10.5           # Async HTTP for REST fallbacks
 
 # Crypto feeds
-python-binance==1.0.19    # Binance WebSocket & REST (Primary crypto)
+python-binance==1.0.37    # Binance WebSocket & REST (Primary crypto)
 # Bybit: uses raw websockets (public feed needs no library)
 
 # US equities
